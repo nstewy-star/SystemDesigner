@@ -212,16 +212,30 @@ export function FloorPlanManager({
                           <Input
                             value={editName}
                             onChange={(e) => setEditName(e.target.value)}
-                            onBlur={commitRename}
+                            onBlur={(e) => {
+                              e.stopPropagation();
+                              commitRename();
+                            }}
                             onKeyDown={(e) => {
                               e.stopPropagation();
-                              if (e.key === "Enter") commitRename();
-                              if (e.key === "Escape") setEditingId(null);
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                commitRename();
+                              }
+                              if (e.key === "Escape") {
+                                e.preventDefault();
+                                setEditingId(null);
+                              }
                             }}
+                            onKeyUp={(e) => e.stopPropagation()}
+                            onKeyPress={(e) => e.stopPropagation()}
                             className="h-5 text-xs px-1 py-0"
                             autoFocus
                             onClick={(e) => e.stopPropagation()}
+                            onContextMenu={(e) => e.stopPropagation()}
                             onMouseDown={(e) => e.stopPropagation()}
+                            onMouseUp={(e) => e.stopPropagation()}
+                            onDoubleClick={(e) => e.stopPropagation()}
                           />
                         ) : (
                           <span className="text-xs font-medium text-gray-800 truncate">
@@ -240,31 +254,25 @@ export function FloorPlanManager({
                             <Check className="w-3 h-3" />
                           </Button>
                         ) : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 text-gray-400 hover:text-gray-600"
+                          <Pencil
+                            className="w-4 h-4 text-gray-600 hover:text-blue-600 cursor-pointer"
                             onClick={(e) => {
                               e.stopPropagation();
                               startRename(fp);
                             }}
-                          >
-                            <Pencil className="w-3 h-3" />
-                          </Button>
+                            title="Rename"
+                          />
                         )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0 text-red-400 hover:text-red-600"
+                        <Trash2
+                          className="w-4 h-4 text-red-500 hover:text-red-700 cursor-pointer"
                           onClick={(e) => {
                             e.stopPropagation();
                             if (confirm(`Remove "${fp.name}"?`)) {
                               onRemoveFloorPlan(fp.id);
                             }
                           }}
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </Button>
+                          title="Delete"
+                        />
                       </div>
                     </div>
                     {isActive && (

@@ -29,9 +29,17 @@ import type { Quote, QuoteLineItem, DevicePricing } from "../types";
 interface QuotePanelProps {
   open: boolean;
   onClose: () => void;
+  cableBreakdown: {
+    LNET: number;
+    KB: number;
+    ETH: number;
+    POWER: number;
+    AC: number;
+    total: number;
+  } | null;
 }
 
-export function QuotePanel({ open, onClose }: QuotePanelProps) {
+export function QuotePanel({ open, onClose, cableBreakdown }: QuotePanelProps) {
   const { currentProject } = useProject();
   const [quote, setQuote] = useState<Quote | null>(null);
   const [lineItems, setLineItems] = useState<QuoteLineItem[]>([]);
@@ -81,6 +89,13 @@ export function QuotePanel({ open, onClose }: QuotePanelProps) {
   useEffect(() => {
     if (open) loadOrCreateQuote();
   }, [open, loadOrCreateQuote]);
+
+  // Sync cable feet from designer calculation
+  useEffect(() => {
+    if (cableBreakdown && cableBreakdown.total > 0) {
+      setCableFeet(Math.ceil(cableBreakdown.total));
+    }
+  }, [cableBreakdown]);
 
   const createQuote = async () => {
     if (!currentProject) return;
@@ -414,6 +429,36 @@ export function QuotePanel({ open, onClose }: QuotePanelProps) {
                     <span className="text-[10px] text-gray-400 mt-0.5 block">
                       Labor: {CABLE_LABOR_HOURS_PER_1000FT} hrs / 1000 ft
                     </span>
+                    {cableBreakdown && cableBreakdown.total > 0 && (
+                      <div className="mt-2 p-2 bg-gray-50 rounded text-[10px] space-y-0.5">
+                        <div className="font-semibold text-gray-700 mb-1">Cable Breakdown:</div>
+                        {cableBreakdown.LNET > 0 && (
+                          <div className="flex justify-between text-gray-600">
+                            <span>L-Net:</span><span>{cableBreakdown.LNET.toFixed(0)} ft</span>
+                          </div>
+                        )}
+                        {cableBreakdown.KB > 0 && (
+                          <div className="flex justify-between text-gray-600">
+                            <span>K-Bus:</span><span>{cableBreakdown.KB.toFixed(0)} ft</span>
+                          </div>
+                        )}
+                        {cableBreakdown.ETH > 0 && (
+                          <div className="flex justify-between text-gray-600">
+                            <span>Ethernet:</span><span>{cableBreakdown.ETH.toFixed(0)} ft</span>
+                          </div>
+                        )}
+                        {cableBreakdown.POWER > 0 && (
+                          <div className="flex justify-between text-gray-600">
+                            <span>DC Power:</span><span>{cableBreakdown.POWER.toFixed(0)} ft</span>
+                          </div>
+                        )}
+                        {cableBreakdown.AC > 0 && (
+                          <div className="flex justify-between text-gray-600">
+                            <span>AC Power:</span><span>{cableBreakdown.AC.toFixed(0)} ft</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <Label className="text-xs text-gray-500">Freight</Label>

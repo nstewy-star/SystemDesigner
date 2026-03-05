@@ -43,6 +43,15 @@ export type Device = {
   kitId?: string;
   preferred?: boolean;
   floorPlanId?: string;
+  // Marshall Nurse Call Labeling Standard
+  roomNumber?: string;
+  serialNumber?: string;
+  vlan?: number;
+  switchPort?: string;
+  floor?: string;
+  building?: string;
+  busType?: string;
+  connectionType?: string;
 };
 
 export type Connection = {

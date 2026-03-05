@@ -73,6 +73,7 @@ export function Designer({ onBack }: DesignerProps) {
   const [hoveredConnection, setHoveredConnection] = useState<string | null>(null);
   const [connectionContextMenu, setConnectionContextMenu] = useState<{ x: number; y: number; connectionId: string } | null>(null);
   const [portContextMenu, setPortContextMenu] = useState<{ x: number; y: number; deviceId: string; portId: string; portType: PortType; devicePart: string } | null>(null);
+  const [alignmentMenu, setAlignmentMenu] = useState<{ x: number; y: number } | null>(null);
   const [showEnvironmentPanel, setShowEnvironmentPanel] = useState(false);
   const [connectFrom, setConnectFrom] = useState<string | null>(null);
   const [showDeviceModels, setShowDeviceModels] = useState(false);
@@ -94,8 +95,21 @@ export function Designer({ onBack }: DesignerProps) {
   const [showQuotePanel, setShowQuotePanel] = useState(false);
   const [showPowerCalc, setShowPowerCalc] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [paletteSelectionBox, setPaletteSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
+  const [canvasSelectionBox, setCanvasSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
+  const [spacebarPressed, setSpacebarPressed] = useState(false);
+  const [highlightedDeviceIds, setHighlightedDeviceIds] = useState<Set<string>>(new Set());
   const canvasRef = useRef<HTMLDivElement>(null);
+  // undo history buffer (devices+connections)
+  const historyRef = useRef<{devices: Device[]; connections: Connection[]}[]>([]);
+  const skipHistoryRef = useRef(false);
+  const hasNormalized = useRef(false);
+  const doubleClickTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastClickIdRef = useRef<string | null>(null);
+  const paletteWrapperRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const paletteCardsRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const canvasDevicesRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const toolBeforePortClick = useRef<"select" | "connect" | "wall" | null>(null);
 
   const canvasToWorld = (clientX: number, clientY: number) => {
@@ -105,6 +119,177 @@ export function Designer({ onBack }: DesignerProps) {
       x: (clientX - rect.left + canvasRef.current.scrollLeft) / zoom,
       y: (clientY - rect.top + canvasRef.current.scrollTop) / zoom,
     };
+  };
+
+  // Signal flow hierarchy - lower number = upstream (source)
+  const getDeviceHierarchy = (part: string): number => {
+    // Consoles - highest level
+    if (part === "R5KCONS") return 10;
+    // MSC - head end
+    if (part === "R5KMSC") return 20;
+    // Switches
+    if (part === "R5K8PRT" || part === "351010" || part === "351006") return 25;
+    // L2K Adapter
+    if (part === "R5KL2KA") return 30;
+    // Termination Boards
+    if (part === "R5KMTRM") return 40;
+    // Power supplies
+    if (part === "R5KMPR15" || part === "R5KMPR36") return 45;
+    // Corridor Lights & Domeless Controllers
+    if (part.includes("CL") || part.includes("DC")) return 50;
+    // Field devices (stations, etc.)
+    return 60;
+  };
+
+  // Ensure connection flows in correct direction (from upstream to downstream)
+  const normalizeConnection = (fromId: string, toId: string, fromPort: string, toPort: string, type: PortType): Connection => {
+    const fromDev = devices.find(d => d.id === fromId);
+    const toDev = devices.find(d => d.id === toId);
+    
+    if (!fromDev || !toDev) {
+      return { id: crypto.randomUUID(), fromId, toId, fromPort, toPort, type };
+    }
+
+    const fromLevel = getDeviceHierarchy(fromDev.part);
+    const toLevel = getDeviceHierarchy(toDev.part);
+
+    // If connection is backward, swap it
+    if (fromLevel > toLevel) {
+      return { id: crypto.randomUUID(), fromId: toId, toId: fromId, fromPort: toPort, toPort: fromPort, type };
+    }
+
+    return { id: crypto.randomUUID(), fromId, toId, fromPort, toPort, type };
+  };
+
+  // Find entire signal chain upstream from clicked device to the source (console)
+  const getUpstreamDevices = (startId: string): Set<string> => {
+    const chain = new Set<string>();
+    const queue = [startId];
+    chain.add(startId);
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      // Find what's sending TO this device (connections where this is toId)
+      // and trace backward to source
+      connections.forEach((conn) => {
+        if (conn.toId === current && !chain.has(conn.fromId)) {
+          chain.add(conn.fromId);
+          queue.push(conn.fromId);
+        }
+      });
+    }
+    return chain;
+  };
+
+  // Normalize all existing connections to ensure correct signal flow direction
+  const normalizeAllConnections = useCallback(() => {
+    const normalized = connections.map(conn => {
+      const fromDev = devices.find(d => d.id === conn.fromId);
+      const toDev = devices.find(d => d.id === conn.toId);
+      
+      if (!fromDev || !toDev) return conn;
+
+      const fromLevel = getDeviceHierarchy(fromDev.part);
+      const toLevel = getDeviceHierarchy(toDev.part);
+
+      // If connection is backward, swap it
+      if (fromLevel > toLevel) {
+        return { 
+          ...conn, 
+          fromId: conn.toId, 
+          toId: conn.fromId, 
+          fromPort: conn.toPort, 
+          toPort: conn.fromPort 
+        };
+      }
+
+      return conn;
+    });
+
+    // Only update if something changed
+    const hasChanges = normalized.some((conn, idx) => 
+      conn.fromId !== connections[idx].fromId || conn.toId !== connections[idx].toId
+    );
+
+    if (hasChanges) {
+      setConnections(normalized);
+    }
+  }, [connections, devices, setConnections]);
+
+  // Auto-normalize connections when project is first loaded
+  useEffect(() => {
+    if (devices.length > 0 && connections.length > 0 && !hasNormalized.current) {
+      normalizeAllConnections();
+      hasNormalized.current = true;
+    }
+  }, [devices.length, connections.length, normalizeAllConnections]);
+
+  // Reset normalization flag when project changes
+  useEffect(() => {
+    hasNormalized.current = false;
+  }, [currentProject?.id]);
+
+  const pushHistory = () => {
+    historyRef.current.unshift({ devices: [...devices], connections: [...connections] });
+    if (historyRef.current.length > 5) historyRef.current.pop();
+  };
+
+  // capture initial state so undo has something to revert
+  useEffect(() => {
+    pushHistory();
+  }, []);
+
+  useEffect(() => {
+    if (skipHistoryRef.current) {
+      skipHistoryRef.current = false;
+      return;
+    }
+    pushHistory();
+  }, [devices, connections]);
+
+  const undo = () => {
+    if (historyRef.current.length === 0) return;
+    const prev = historyRef.current.shift();
+    if (prev) {
+      skipHistoryRef.current = true;
+      setDevices(prev.devices);
+      setConnections(prev.connections);
+    }
+  };
+
+
+  // ==============================
+  // Marshall alignment helpers
+  // ==============================
+
+  const getScaledSize = (d: Device) => {
+    const def = DEVICE_DEFS[d.part];
+    const baseW = def?.w ?? 140;
+    const baseH = def?.h ?? 80;
+    const scale = (currentProject?.device_scale ?? 100) / 100;
+    return { w: baseW * scale, h: baseH * scale };
+  };
+
+  const getBounds = (d: Device) => {
+    const { w, h } = getScaledSize(d);
+    return {
+      left: d.x - w / 2,
+      right: d.x + w / 2,
+      top: d.y - h / 2,
+      bottom: d.y + h / 2,
+      w,
+      h,
+    };
+  };
+
+  const detectColumnCount = (sorted: Device[]) => {
+    const xs = sorted.map((d) => d.x).sort((a, b) => a - b);
+    if (xs.length < 3) return xs.length;
+
+    const diffs = xs.slice(1).map((x, i) => x - xs[i]);
+    const median = [...diffs].sort((a, b) => a - b)[Math.floor(diffs.length / 2)] || 0;
+    const bigGaps = diffs.filter((d) => d > Math.max(60, median * 1.8)).length;
+    return Math.min(6, Math.max(2, bigGaps + 1));
   };
 
   const handleWheel = useCallback((e: WheelEvent) => {
@@ -199,7 +384,7 @@ export function Designer({ onBack }: DesignerProps) {
 
 
   const onPaletteItemClick = (e: React.MouseEvent, part: string) => {
-    if (e.shiftKey) {
+    if (e.ctrlKey || e.metaKey) {
       const sel = new Set(selectedPaletteParts);
       if (selectedPalettePart && !sel.has(selectedPalettePart)) sel.add(selectedPalettePart);
       if (sel.has(part)) sel.delete(part); else sel.add(part);
@@ -243,7 +428,8 @@ export function Designer({ onBack }: DesignerProps) {
           if (fromDevs.length > 0 && toDevs.length > 0) {
             fromDevs.forEach((fd, idx) => {
               const td = toDevs[idx] || toDevs[0];
-              newConns.push({ id: crypto.randomUUID(), fromId: fd.id, fromPort: "", toId: td.id, toPort: "", type: kc.type as PortType });
+              const conn = normalizeConnection(fd.id, td.id, "", "", kc.type as PortType);
+              newConns.push(conn);
             });
           }
         });
@@ -281,10 +467,12 @@ export function Designer({ onBack }: DesignerProps) {
             (c.toId === targetDevice!.id && c.toPort === targetPort!.id)
           ).length;
           if (!targetPort.limit || targetUsage < targetPort.limit) {
-            setConnections([...connections, {
-              id: crypto.randomUUID(), fromId: targetDevice.id, fromPort: targetPort.id,
-              toId: id, toPort: matchingPort.id, type: targetPort.type,
-            }]);
+            const conn = normalizeConnection(
+              targetDevice.id, id,
+              targetPort.id, matchingPort.id,
+              targetPort.type
+            );
+            setConnections([...connections, conn]);
           }
         }
       }
@@ -292,10 +480,34 @@ export function Designer({ onBack }: DesignerProps) {
   };
 
   const onDeviceMouseDown = (e: React.MouseEvent, id: string) => {
+    // ignore right-click so we don't clear selection
+    if (e.button !== 0) {
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
     e.stopPropagation();
     e.preventDefault();
+
+    // Detect double-click for signal path highlighting
+    if (lastClickIdRef.current === id) {
+      // Double-click detected
+      if (doubleClickTimerRef.current) clearTimeout(doubleClickTimerRef.current);
+      lastClickIdRef.current = null;
+      const upstream = getUpstreamDevices(id);
+      setHighlightedDeviceIds(upstream);
+      return;
+    }
+
+    // Single-click: clear double-click timer and set up new one
+    if (doubleClickTimerRef.current) clearTimeout(doubleClickTimerRef.current);
+    lastClickIdRef.current = id;
+    doubleClickTimerRef.current = setTimeout(() => {
+      lastClickIdRef.current = null;
+    }, 300);
+
     if (tool === "select") {
-      if (e.shiftKey) {
+      if (e.ctrlKey || e.metaKey) {
         const sel = new Set(selectedIds);
         sel.has(id) ? sel.delete(id) : sel.add(id);
         setSelectedIds(sel);
@@ -321,10 +533,8 @@ export function Designer({ onBack }: DesignerProps) {
       if (devDef && devDef.ports.length > 0) return;
       if (!connectFrom) { setConnectFrom(id); setSelectedId(id); }
       else if (connectFrom !== id) {
-        setConnections([...connections, {
-          id: crypto.randomUUID(), fromId: connectFrom, fromPort: "", toId: id, toPort: "",
-          type: inferConnType(connectFrom, id),
-        }]);
+        const conn = normalizeConnection(connectFrom, id, "", "", inferConnType(connectFrom, id));
+        setConnections([...connections, conn]);
         setConnectFrom(null);
       }
     }
@@ -350,6 +560,136 @@ export function Designer({ onBack }: DesignerProps) {
     setDevices(devices.filter((d) => d.id !== selectedId));
     setConnections(connections.filter((c) => c.fromId !== selectedId && c.toId !== selectedId));
     setSelectedId(null);
+  };
+
+  // Alignment functions for multiple selected devices (enhanced visual version)
+  const alignDevices = (direction: "top" | "bottom" | "left" | "right" | "grid") => {
+    if (selectedIds.size < 2) return;
+
+    const sel = Array.from(selectedIds)
+      .map((id) => devices.find((d) => d.id === id))
+      .filter((d): d is Device => !!d);
+
+    if (sel.length < 2) return;
+
+    const boundsById = new Map(sel.map((d) => [d.id, getBounds(d)]));
+
+    if (direction === "top") {
+      const minTop = Math.min(...sel.map((d) => boundsById.get(d.id)!.top));
+      setDevices(
+        devices.map((d) => {
+          if (!selectedIds.has(d.id)) return d;
+          const b = boundsById.get(d.id)!;
+          return { ...d, y: minTop + b.h / 2 };
+        })
+      );
+      setAlignmentMenu(null);
+      return;
+    }
+
+    if (direction === "bottom") {
+      const maxBottom = Math.max(...sel.map((d) => boundsById.get(d.id)!.bottom));
+      setDevices(
+        devices.map((d) => {
+          if (!selectedIds.has(d.id)) return d;
+          const b = boundsById.get(d.id)!;
+          return { ...d, y: maxBottom - b.h / 2 };
+        })
+      );
+      setAlignmentMenu(null);
+      return;
+    }
+
+    if (direction === "left") {
+      const minLeft = Math.min(...sel.map((d) => boundsById.get(d.id)!.left));
+      setDevices(
+        devices.map((d) => {
+          if (!selectedIds.has(d.id)) return d;
+          const b = boundsById.get(d.id)!;
+          return { ...d, x: minLeft + b.w / 2 };
+        })
+      );
+      setAlignmentMenu(null);
+      return;
+    }
+
+    if (direction === "right") {
+      const maxRight = Math.max(...sel.map((d) => boundsById.get(d.id)!.right));
+      setDevices(
+        devices.map((d) => {
+          if (!selectedIds.has(d.id)) return d;
+          const b = boundsById.get(d.id)!;
+          return { ...d, x: maxRight - b.w / 2 };
+        })
+      );
+      setAlignmentMenu(null);
+      return;
+    }
+
+    if (direction === "grid") {
+      const sorted = [...sel].sort((a, b) => {
+        const ba = boundsById.get(a.id)!;
+        const bb = boundsById.get(b.id)!;
+        return ba.top !== bb.top ? ba.top - bb.top : ba.left - bb.left;
+      });
+
+      const groupLeft = Math.min(...sorted.map((d) => boundsById.get(d.id)!.left));
+      const groupTop = Math.min(...sorted.map((d) => boundsById.get(d.id)!.top));
+
+      const cols = detectColumnCount(sorted);
+
+      const rows: Device[][] = [];
+      for (let i = 0; i < sorted.length; i += cols) rows.push(sorted.slice(i, i + cols));
+
+      const colMaxW = Array(cols).fill(0);
+      rows.forEach((r) => {
+        r.forEach((d, c) => {
+          colMaxW[c] = Math.max(colMaxW[c], boundsById.get(d.id)!.w);
+        });
+      });
+
+      const rowMaxH = rows.map((r) => Math.max(...r.map((d) => boundsById.get(d.id)!.h)));
+      const gutterX = 60;
+      const gutterY = 70;
+
+      const colLefts: number[] = [];
+      let xCursor = groupLeft;
+      for (let c = 0; c < cols; c++) {
+        colLefts[c] = xCursor;
+        xCursor += colMaxW[c] + gutterX;
+      }
+
+      const rowTops: number[] = [];
+      let yCursor = groupTop;
+      for (let r = 0; r < rows.length; r++) {
+        rowTops[r] = yCursor;
+        yCursor += rowMaxH[r] + gutterY;
+      }
+
+      const updated = devices.map((d) => {
+        if (!selectedIds.has(d.id)) return d;
+
+        const idx = sorted.findIndex((sd) => sd.id === d.id);
+        if (idx < 0) return d;
+
+        const r = Math.floor(idx / cols);
+        const c = idx % cols;
+
+        const b = boundsById.get(d.id)!;
+        const left = colLefts[c];
+        const top = rowTops[r];
+
+        return {
+          ...d,
+          x: left + b.w / 2,
+          y: top + b.h / 2,
+        };
+      });
+
+      setDevices(updated);
+      setAlignmentMenu(null);
+      return;
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -454,6 +794,67 @@ export function Designer({ onBack }: DesignerProps) {
     const pixels = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
     return { pixels, feet: floorplanScale ? pixels * floorplanScale : null };
   };
+
+  // Check if device is a head-end device (all housed in same wall box)
+  const isHeadEndDevice = (part: string): boolean => {
+    return ["R5KMSC", "R5KL2KA", "R5KMTRM", "R5KMPR15", "R5KMPR36", "R5K8PRT", "351010", "351006"].includes(part);
+  };
+
+  const totalCableLength = useMemo(() => {
+    if (!floorplanScale) return null;
+    
+    let total = 0;
+    visibleConnections.forEach((conn) => {
+      const from = devices.find((d) => d.id === conn.fromId);
+      const to = devices.find((d) => d.id === conn.toId);
+      if (from && to) {
+        // Head-end devices are all within 2 feet of each other
+        if (isHeadEndDevice(from.part) && isHeadEndDevice(to.part)) {
+          total += 2;
+        } else {
+          const len = calculateCableLength(from.x, from.y, to.x, to.y);
+          if (len.feet) total += len.feet;
+        }
+      }
+    });
+    
+    return total;
+  }, [visibleConnections, devices, floorplanScale]);
+
+  const cableBreakdown = useMemo(() => {
+    if (!floorplanScale) return null;
+    
+    const breakdown = {
+      LNET: 0,
+      KB: 0,
+      ETH: 0,
+      POWER: 0,
+      AC: 0,
+      total: 0
+    };
+    
+    visibleConnections.forEach((conn) => {
+      const from = devices.find((d) => d.id === conn.fromId);
+      const to = devices.find((d) => d.id === conn.toId);
+      if (from && to) {
+        let length: number;
+        // Head-end devices are all within 2 feet of each other
+        if (isHeadEndDevice(from.part) && isHeadEndDevice(to.part)) {
+          length = 2;
+        } else {
+          const len = calculateCableLength(from.x, from.y, to.x, to.y);
+          length = len.feet || 0;
+        }
+        
+        if (length > 0) {
+          breakdown[conn.type] += length;
+          breakdown.total += length;
+        }
+      }
+    });
+    
+    return breakdown;
+  }, [visibleConnections, devices, floorplanScale]);
 
   const totalDevices = devices.length;
 
@@ -576,7 +977,8 @@ export function Designer({ onBack }: DesignerProps) {
       const result = validateConnection(fromDev, a.type, toDev, b.type, connections);
       if (!result.valid) { alert(result.reason || "Invalid connection"); setConnectFrom(null); setDraggingConnection(null); restoreToolAfterConnect(); return; }
     }
-    setConnections([...connections, { id: crypto.randomUUID(), fromId: fromDevId, fromPort: fromPortId, toId: devId, toPort: portId, type: a.type }]);
+    const conn = normalizeConnection(fromDevId, devId, fromPortId, portId, a.type);
+    setConnections([...connections, conn]);
     setConnectFrom(null);
     setDraggingConnection(null);
     setShowCompatibleModal(false);
@@ -597,7 +999,8 @@ export function Designer({ onBack }: DesignerProps) {
       const ports = getDevicePorts(part);
       const cp = ports.filter((p) => p.type === compatibleDevices.portType);
       if (cp.length >= 1) {
-        setConnections([...connections, { id: crypto.randomUUID(), fromId: compatibleDevices.sourceDeviceId, fromPort: compatibleDevices.sourcePortId, toId: newId, toPort: cp[0].id, type: compatibleDevices.portType }]);
+        const conn = normalizeConnection(compatibleDevices.sourceDeviceId, newId, compatibleDevices.sourcePortId, cp[0].id, compatibleDevices.portType);
+        setConnections([...connections, conn]);
         setConnectFrom(null);
         setShowCompatibleModal(false);
         setDraggingConnection(null);
@@ -607,10 +1010,12 @@ export function Designer({ onBack }: DesignerProps) {
 
   const handleConnectToDevice = useCallback((targetDeviceId: string, targetPortId: string) => {
     if (!compatibleDevices.sourceDeviceId || !compatibleDevices.sourcePortId) return;
-    setConnections([...connections, {
-      id: crypto.randomUUID(), fromId: compatibleDevices.sourceDeviceId, fromPort: compatibleDevices.sourcePortId,
-      toId: targetDeviceId, toPort: targetPortId, type: compatibleDevices.portType,
-    }]);
+    const conn = normalizeConnection(
+      compatibleDevices.sourceDeviceId, targetDeviceId,
+      compatibleDevices.sourcePortId, targetPortId,
+      compatibleDevices.portType
+    );
+    setConnections([...connections, conn]);
     setConnectFrom(null);
     setShowCompatibleModal(false);
     setDraggingConnection(null);
@@ -640,7 +1045,12 @@ export function Designer({ onBack }: DesignerProps) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setDraggingConnection(null); setConnectFrom(null); setShowCompatibleModal(false); restoreToolAfterConnect(); return; }
+      if (e.key === "Escape") { setDraggingConnection(null); setConnectFrom(null); setShowCompatibleModal(false); restoreToolAfterConnect(); setHighlightedDeviceIds(new Set()); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        undo();
+        return;
+      }
       if (e.key === "Delete" && !e.ctrlKey && !e.metaKey) {
         const el = document.activeElement;
         if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) return;
@@ -656,6 +1066,21 @@ export function Designer({ onBack }: DesignerProps) {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "g") {
         e.preventDefault();
+        // Check canvas device selection first
+        if (selectedIds.size > 0) {
+          const selectedParts = new Set<string>();
+          devices.forEach((d) => {
+            if (selectedIds.has(d.id)) {
+              selectedParts.add(d.part);
+            }
+          });
+          if (selectedParts.size > 0) {
+            setSelectedPaletteParts(selectedParts);
+            setShowKitModal(true);
+          }
+          return;
+        }
+        // Fall back to palette selection
         if (selectedPaletteParts.size === 0) return;
         setShowKitModal(true);
         return;
@@ -673,39 +1098,244 @@ export function Designer({ onBack }: DesignerProps) {
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
     return () => { window.removeEventListener("keydown", handleKeyDown); window.removeEventListener("keyup", handleKeyUp); };
-  }, [selectedPaletteParts, tool]);
+  }, [selectedPaletteParts, selectedIds, devices, tool]);
+
+  // Cleanup double-click timer on unmount
+  useEffect(() => {
+    return () => {
+      if (doubleClickTimerRef.current) clearTimeout(doubleClickTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!spacebarPressed) {
+          setSpacebarPressed(true);
+        }
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        e.preventDefault();
+        e.stopPropagation();
+        setSpacebarPressed(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener("keyup", handleKeyUp, true);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("keyup", handleKeyUp, true);
+    };
+  }, [spacebarPressed]);
+
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    
+    let isPanning = false;
+    let panStartX = 0;
+    let panStartY = 0;
+    let scrollStartX = 0;
+    let scrollStartY = 0;
+    
+    const handleMouseDown = (e: MouseEvent) => {
+      if (!spacebarPressed || !canvasRef.current) return;
+      isPanning = true;
+      panStartX = e.clientX;
+      panStartY = e.clientY;
+      scrollStartX = canvasRef.current.scrollLeft;
+      scrollStartY = canvasRef.current.scrollTop;
+    };
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isPanning || !canvasRef.current) return;
+      const deltaX = e.clientX - panStartX;
+      const deltaY = e.clientY - panStartY;
+      canvasRef.current.scrollLeft = scrollStartX - deltaX;
+      canvasRef.current.scrollTop = scrollStartY - deltaY;
+    };
+    
+    const handleMouseUp = () => {
+      isPanning = false;
+    };
+    
+    canvasRef.current.addEventListener("mousedown", handleMouseDown);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    
+    return () => {
+      if (canvasRef.current) {
+        canvasRef.current.removeEventListener("mousedown", handleMouseDown);
+      }
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [spacebarPressed]);
+
+  useEffect(() => {
+    const handlePaletteMouseDown = (e: MouseEvent) => {
+      if (!paletteWrapperRef.current) return;
+      const rect = paletteWrapperRef.current.getBoundingClientRect();
+      if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+      
+      const target = e.target as HTMLElement;
+      if (target.closest('[data-palette-card]') || target.closest('button') || target.closest('[role="button"]')) return;
+      setPaletteSelectionBox({ startX: e.clientX, startY: e.clientY, endX: e.clientX, endY: e.clientY });
+    };
+
+    const handlePaletteMouseMove = (e: MouseEvent) => {
+      setPaletteSelectionBox((prev) => prev ? { ...prev, endX: e.clientX, endY: e.clientY } : null);
+    };
+
+    const handlePaletteMouseUp = () => {
+      setPaletteSelectionBox((prev) => {
+        if (!prev) return null;
+        const { startX, startY, endX, endY } = prev;
+        if (Math.abs(endX - startX) < 5 && Math.abs(endY - startY) < 5) {
+          setPaletteSelectionBox(null);
+          return null;
+        }
+        
+        const minX = Math.min(startX, endX);
+        const maxX = Math.max(startX, endX);
+        const minY = Math.min(startY, endY);
+        const maxY = Math.max(startY, endY);
+        
+        const selected = new Set<string>();
+        paletteCardsRef.current.forEach((el, part) => {
+          const rect = el.getBoundingClientRect();
+          if (rect.right > minX && rect.left < maxX && rect.bottom > minY && rect.top < maxY) {
+            selected.add(part);
+          }
+        });
+        
+        if (selected.size > 0) {
+          setSelectedPaletteParts(selected);
+        }
+        setPaletteSelectionBox(null);
+        return null;
+      });
+    };
+
+    if (paletteSelectionBox) {
+      document.addEventListener("mousemove", handlePaletteMouseMove);
+      document.addEventListener("mouseup", handlePaletteMouseUp);
+      return () => {
+        document.removeEventListener("mousemove", handlePaletteMouseMove);
+        document.removeEventListener("mouseup", handlePaletteMouseUp);
+      };
+    } else {
+      document.addEventListener("mousedown", handlePaletteMouseDown);
+      return () => {
+        document.removeEventListener("mousedown", handlePaletteMouseDown);
+      };
+    }
+  }, [paletteSelectionBox]);
+
+  useEffect(() => {
+    const handleCanvasMouseDown = (e: MouseEvent) => {
+      // Skip if spacebar is pressed (we're panning instead)
+      if (spacebarPressed) return;
+      
+      if (!canvasRef.current) return;
+      const rect = canvasRef.current.getBoundingClientRect();
+      if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+      
+      const target = e.target as HTMLElement;
+      // Skip if clicking on a device or interactive element
+      if (target.closest('[data-device-id]') || target.closest('button') || target.closest('[role="button"]') || target.closest('svg')) return;
+      
+      setCanvasSelectionBox({ startX: e.clientX, startY: e.clientY, endX: e.clientX, endY: e.clientY });
+    };
+
+    const handleCanvasMouseMove = (e: MouseEvent) => {
+      setCanvasSelectionBox((prev) => prev ? { ...prev, endX: e.clientX, endY: e.clientY } : null);
+    };
+
+    const handleCanvasMouseUp = () => {
+      setCanvasSelectionBox((prev) => {
+        if (!prev) return null;
+        const { startX, startY, endX, endY } = prev;
+        if (Math.abs(endX - startX) < 5 && Math.abs(endY - startY) < 5) {
+          setCanvasSelectionBox(null);
+          return null;
+        }
+        
+        const minX = Math.min(startX, endX);
+        const maxX = Math.max(startX, endX);
+        const minY = Math.min(startY, endY);
+        const maxY = Math.max(startY, endY);
+        
+        const selected = new Set<string>();
+        canvasDevicesRef.current.forEach((el, deviceId) => {
+          const rect = el.getBoundingClientRect();
+          if (rect.right > minX && rect.left < maxX && rect.bottom > minY && rect.top < maxY) {
+            selected.add(deviceId);
+          }
+        });
+        
+        if (selected.size > 0) {
+          setSelectedIds(selected);
+        }
+        setCanvasSelectionBox(null);
+        return null;
+      });
+    };
+
+    if (canvasSelectionBox) {
+      document.addEventListener("mousemove", handleCanvasMouseMove);
+      document.addEventListener("mouseup", handleCanvasMouseUp);
+      return () => {
+        document.removeEventListener("mousemove", handleCanvasMouseMove);
+        document.removeEventListener("mouseup", handleCanvasMouseUp);
+      };
+    } else {
+      document.addEventListener("mousedown", handleCanvasMouseDown);
+      return () => {
+        document.removeEventListener("mousedown", handleCanvasMouseDown);
+      };
+    }
+  }, [canvasSelectionBox, spacebarPressed]);
 
   const renderPaletteCard = (item: DeviceLibraryItem) => (
-    <Card
+    <div
       key={item.part}
-      draggable
-      onDragStart={(e) => onPaletteDragStart(e, item.part)}
-      onClick={(e) => onPaletteItemClick(e, item.part)}
-      className={`cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow ${
-        selectedPalettePart === item.part ? "ring-2 ring-blue-400" : ""
-      } ${selectedPaletteParts.has(item.part) ? "ring-2 ring-green-400" : ""}`}
+      ref={(el) => { if (el) paletteCardsRef.current.set(item.part, el); else paletteCardsRef.current.delete(item.part); }}
+      data-palette-card
     >
-      <CardContent className="p-3">
-        <div className="flex items-center justify-center mb-2">
-          {DEVICE_DEFS[item.part] ? (
-            getDeviceSchematic(item.part) ? (
-              <img src={getDeviceSchematic(item.part)} alt={item.part} className="w-16 h-16 object-contain" />
+      <Card
+        draggable
+        onDragStart={(e) => onPaletteDragStart(e, item.part)}
+        onClick={(e) => onPaletteItemClick(e, item.part)}
+        className={`cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow ${
+          selectedPalettePart === item.part ? "ring-2 ring-blue-400" : ""
+        } ${selectedPaletteParts.has(item.part) ? "ring-2 ring-green-400" : ""}`}
+      >
+        <CardContent className="p-3">
+          <div className="flex items-center justify-center mb-2">
+            {DEVICE_DEFS[item.part] ? (
+              getDeviceSchematic(item.part) ? (
+                <img src={getDeviceSchematic(item.part)} alt={item.part} className="w-16 h-16 object-contain" />
+              ) : (
+                <DeviceSVG part={item.part} width={64} height={64} />
+              )
             ) : (
-              <DeviceSVG part={item.part} width={64} height={64} />
-            )
-          ) : (
-            <DeviceIcon part={item.part} className="w-16 h-16 flex-shrink-0" />
-          )}
-        </div>
-        <div className="text-center">
-          <div className="text-xs font-semibold text-gray-800 truncate flex items-center justify-center gap-1">
-            {item.part}
-            {item.preferred && <Star className="w-3 h-3 fill-amber-400 text-amber-400" />}
+              <DeviceIcon part={item.part} className="w-16 h-16 flex-shrink-0" />
+            )}
           </div>
-          <div className="text-xs text-gray-500">{item.power_mA}mA</div>
-        </div>
-      </CardContent>
-    </Card>
+          <div className="text-center">
+            <div className="text-xs font-semibold text-gray-800 truncate flex items-center justify-center gap-1">
+              {item.part}
+              {item.preferred && <Star className="w-3 h-3 fill-amber-400 text-amber-400" />}
+            </div>
+            <div className="text-xs text-gray-500">{item.power_mA}mA</div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 
   const renderPort = (device: Device, _def: DeviceDef, p: PortDef, index: number, total: number, position: "power" | "top" | "bottom" | "right") => {
@@ -797,7 +1427,7 @@ export function Designer({ onBack }: DesignerProps) {
 
       <div className="flex-1 flex overflow-hidden">
         {/* LEFT PALETTE */}
-        <div className="w-72 bg-white border-r shadow-lg flex flex-col">
+        <div className="w-72 bg-white border-r shadow-lg flex flex-col" ref={paletteWrapperRef}>
           <div className="p-3 border-b flex items-center justify-between">
             <h2 className="font-semibold text-xs text-gray-700 uppercase tracking-wider">Device Palette</h2>
             <Button size="sm" variant="outline" onClick={() => setShowAddDeviceForm(true)} className="h-6 px-2 text-xs">
@@ -812,19 +1442,20 @@ export function Designer({ onBack }: DesignerProps) {
               <TabsTrigger value="room" className="text-xs">Room</TabsTrigger>
             </TabsList>
             <TabsContent value="all" className="flex-1 overflow-hidden mt-2">
-              <ScrollArea className="h-full p-3">
-                {selectedPaletteParts.size > 0 && (
-                  <div className="mb-3 p-2 bg-green-50 border border-green-200 rounded-md">
-                    <div className="text-xs text-green-700 font-medium">
-                      {selectedPaletteParts.size} selected - <kbd className="px-1 py-0.5 bg-white border border-green-300 rounded text-xs">Ctrl+G</kbd> to create kit
+              <div className="relative h-full">
+                <ScrollArea className="h-full p-3">
+                  {selectedPaletteParts.size > 0 && (
+                    <div className="mb-3 p-2 bg-green-50 border border-green-200 rounded-md">
+                      <div className="text-xs text-green-700 font-medium">
+                        {selectedPaletteParts.size} selected - <kbd className="px-1 py-0.5 bg-white border border-green-300 rounded text-xs">Ctrl+G</kbd> to create kit
+                      </div>
                     </div>
-                  </div>
-                )}
-                <div className="mb-4">
-                  <div className="text-xs font-bold text-gray-600 mb-2 px-1">Kits</div>
-                  {kits.length === 0 ? (
-                    <div className="p-3 text-xs text-gray-500 text-center bg-gray-50 border border-gray-200 rounded-md">Shift+Click devices, Ctrl+G to create kit</div>
-                  ) : (
+                  )}
+                  <div className="mb-4">
+                    <div className="text-xs font-bold text-gray-600 mb-2 px-1">Kits</div>
+                    {kits.length === 0 ? (
+                      <div className="p-3 text-xs text-gray-500 text-center bg-gray-50 border border-gray-200 rounded-md">Drag to select, Ctrl+Click, or Ctrl+G to create kit</div>
+                    ) : (
                     <div className="space-y-2">
                       {kits.map((kit) => (
                         <Card key={kit.id} draggable onDragStart={(e) => onKitDragStart(e, kit.id)} className="cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow border-2 border-green-200">
@@ -854,6 +1485,18 @@ export function Designer({ onBack }: DesignerProps) {
                   );
                 })}
               </ScrollArea>
+                {paletteSelectionBox && (
+                  <div
+                    className="absolute bg-blue-200 border-2 border-blue-400 opacity-50 pointer-events-none"
+                    style={{
+                      left: Math.min(paletteSelectionBox.startX, paletteSelectionBox.endX),
+                      top: Math.min(paletteSelectionBox.startY, paletteSelectionBox.endY),
+                      width: Math.abs(paletteSelectionBox.endX - paletteSelectionBox.startX),
+                      height: Math.abs(paletteSelectionBox.endY - paletteSelectionBox.startY),
+                    }}
+                  />
+                )}
+              </div>
             </TabsContent>
             <TabsContent value="head-end" className="flex-1 overflow-hidden mt-2">
               <ScrollArea className="h-full p-3">
@@ -916,10 +1559,21 @@ export function Designer({ onBack }: DesignerProps) {
 
         {/* CENTER CANVAS */}
         <div
-          className={`flex-1 overflow-auto relative bg-gray-100 select-none ${tool === "connect" || tool === "wall" ? "cursor-crosshair" : ""}`}
+          className={`flex-1 overflow-auto relative bg-gray-100 select-none ${spacebarPressed ? "cursor-grab active:cursor-grabbing" : ""} ${tool === "connect" || tool === "wall" ? "cursor-crosshair" : ""}`}
           ref={canvasRef} onDragOver={onCanvasDragOver} onDrop={onCanvasDrop}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            if (selectedIds.size > 1) {
+              setAlignmentMenu({ x: e.clientX, y: e.clientY });
+            }
+          }}
           onDoubleClick={(e) => { if (!copiedDevice || !canvasRef.current) return; const { x, y } = canvasToWorld(e.clientX, e.clientY); setDevices([...devices, { ...copiedDevice, id: crypto.randomUUID(), name: `${copiedDevice.part}-${devices.length + 1}`, x, y, floorPlanId: activeFloorPlanId || undefined }]); }}
           onClick={(e) => {
+            // Clear signal path highlight if clicking on canvas
+            if (highlightedDeviceIds.size > 0 && e.target === canvasRef.current) {
+              setHighlightedDeviceIds(new Set());
+              return;
+            }
             if (tool === "wall" && canvasRef.current) {
               const { x, y } = canvasToWorld(e.clientX, e.clientY);
               if (!drawingWall) setDrawingWall({ x, y });
@@ -927,7 +1581,7 @@ export function Designer({ onBack }: DesignerProps) {
             }
           }}
           onMouseMove={(e) => {
-            if (!canvasRef.current) return;
+            if (spacebarPressed || !canvasRef.current) return;
             const { x, y } = canvasToWorld(e.clientX, e.clientY);
             if (tool === "wall" && drawingWall) setWallPreviewEnd({ x, y });
             if (draggingConnection) setDraggingConnection((prev) => prev ? { ...prev, mouseX: x, mouseY: y } : null);
@@ -954,8 +1608,13 @@ export function Designer({ onBack }: DesignerProps) {
                 const midX = (coords.x1 + coords.x2) / 2;
                 const midY = (coords.y1 + coords.y2) / 2;
                 const isHovered = groupConns.some((c) => c.id === hoveredConnection);
+                // Check if connection is in highlighted signal path
+                const isInHighlight = highlightedDeviceIds.size > 0 && groupConns.some((c) => 
+                  highlightedDeviceIds.has(c.fromId) && highlightedDeviceIds.has(c.toId)
+                );
+                const connOpacity = highlightedDeviceIds.size > 0 ? (isInHighlight ? 1 : 0.15) : 1;
                 return (
-                  <g key={groupKey}>
+                  <g key={groupKey} style={{ opacity: connOpacity }}>
                     <path d={pathData} stroke={getLineColor(first.type)} strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" fill="none" className="pointer-events-auto cursor-pointer opacity-0 hover:opacity-30 transition-opacity"
                       onMouseEnter={() => setHoveredConnection(first.id)} onMouseLeave={() => setHoveredConnection(null)}
                       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setConnectionContextMenu({ x: e.clientX, y: e.clientY, connectionId: first.id }); }} />
@@ -1024,8 +1683,17 @@ export function Designer({ onBack }: DesignerProps) {
               else if (p.type === "ETH") portsByType.right.push(p);
             });
             return (
-              <div key={device.id} className={`absolute z-10 ${isSelected ? "ring-2 ring-blue-500" : isInMulti ? "ring-2 ring-green-400" : ""}`}
-                style={{ left: device.x, top: device.y, transform: "translate(-50%, -50%)", opacity: deviceOpacity / 100 }}
+              <div key={device.id} data-device-id={device.id}
+                ref={(el) => { if (el) canvasDevicesRef.current.set(device.id, el); else canvasDevicesRef.current.delete(device.id); }}
+                className={`absolute z-10 ${isSelected ? "ring-2 ring-blue-500" : isInMulti ? "ring-2 ring-green-400" : ""}`}
+                style={{ 
+                  left: device.x, 
+                  top: device.y, 
+                  transform: "translate(-50%, -50%)", 
+                  opacity: highlightedDeviceIds.size > 0 
+                    ? (highlightedDeviceIds.has(device.id) ? 1 : 0.5)
+                    : (deviceOpacity / 100)
+                }}
                 onMouseDown={(e) => onDeviceMouseDown(e, device.id)} onContextMenu={(e) => { e.preventDefault(); setCopiedDevice(device); }}>
                 <div className="relative">
                   <div className="shadow-lg" style={{ opacity: deviceOpacity / 100 }}>
@@ -1049,6 +1717,26 @@ export function Designer({ onBack }: DesignerProps) {
               </div>
             );
           })}
+          {canvasSelectionBox && canvasRef.current && (() => {
+            const rect = canvasRef.current.getBoundingClientRect();
+            const worldStartX = canvasSelectionBox.startX - rect.left + canvasRef.current.scrollLeft;
+            const worldStartY = canvasSelectionBox.startY - rect.top + canvasRef.current.scrollTop;
+            const worldEndX = canvasSelectionBox.endX - rect.left + canvasRef.current.scrollLeft;
+            const worldEndY = canvasSelectionBox.endY - rect.top + canvasRef.current.scrollTop;
+            return (
+              <div style={{
+                position: "absolute",
+                left: Math.min(worldStartX, worldEndX),
+                top: Math.min(worldStartY, worldEndY),
+                width: Math.abs(worldEndX - worldStartX),
+                height: Math.abs(worldEndY - worldStartY),
+                border: "2px solid #3b82f6",
+                backgroundColor: "rgba(59, 130, 246, 0.1)",
+                pointerEvents: "none",
+                zIndex: 1000,
+              }} />
+            );
+          })()}
           </div>
         </div>
 
@@ -1113,6 +1801,19 @@ export function Designer({ onBack }: DesignerProps) {
               <div className="space-y-4">
                 <div><Label className="text-xs">Device Name</Label><Input value={selectedDevice.name} onChange={(e) => updateSelectedDevice({ name: e.target.value })} className="mt-1" /></div>
                 <div><Label className="text-xs">Part Number</Label><Input value={selectedDevice.part} disabled className="mt-1" /></div>
+                <div><Label className="text-xs">Serial Number</Label><Input value={selectedDevice.serialNumber || ""} onChange={(e) => updateSelectedDevice({ serialNumber: e.target.value })} placeholder="e.g., SN-12345" className="mt-1" /></div>
+                
+                <hr className="my-2" />
+                <p className="text-xs font-semibold text-gray-600 uppercase">Marshall Standard Labels</p>
+                
+                <div><Label className="text-xs">Room Number</Label><Input value={selectedDevice.roomNumber || ""} onChange={(e) => updateSelectedDevice({ roomNumber: e.target.value })} placeholder="e.g., RM214" className="mt-1" /></div>
+                <div><Label className="text-xs">Floor / Building</Label><div className="grid grid-cols-2 gap-2 mt-1"><Input value={selectedDevice.floor || ""} onChange={(e) => updateSelectedDevice({ floor: e.target.value })} placeholder="Floor" /><Input value={selectedDevice.building || ""} onChange={(e) => updateSelectedDevice({ building: e.target.value })} placeholder="Building" /></div></div>
+                <div><Label className="text-xs">Bus Type</Label><Input value={selectedDevice.busType || ""} onChange={(e) => updateSelectedDevice({ busType: e.target.value })} placeholder="e.g., KB-A, LN-1, ETH" className="mt-1" /></div>
+                <div><Label className="text-xs">Connection Type</Label><Input value={selectedDevice.connectionType || ""} onChange={(e) => updateSelectedDevice({ connectionType: e.target.value })} placeholder="e.g., PoE, 15VDC, 120VAC" className="mt-1" /></div>
+                <div><Label className="text-xs">VLAN (if networked)</Label><Input type="number" value={selectedDevice.vlan || ""} onChange={(e) => updateSelectedDevice({ vlan: e.target.value ? parseInt(e.target.value) : undefined })} placeholder="e.g., 100" className="mt-1" /></div>
+                <div><Label className="text-xs">Switch Port</Label><Input value={selectedDevice.switchPort || ""} onChange={(e) => updateSelectedDevice({ switchPort: e.target.value })} placeholder="e.g., SW-1 Port 12" className="mt-1" /></div>
+                
+                <hr className="my-2" />
                 <div><Label className="text-xs">L-Net Segment</Label><Input value={selectedDevice.lnet || ""} onChange={(e) => updateSelectedDevice({ lnet: e.target.value })} placeholder="e.g., LNET-1" className="mt-1" /></div>
                 <div><Label className="text-xs">Zone / Coverage</Label><Input value={selectedDevice.zone || ""} onChange={(e) => updateSelectedDevice({ zone: e.target.value })} placeholder="e.g., Zone A" className="mt-1" /></div>
                 {floorPlans.length > 0 && (
@@ -1140,6 +1841,27 @@ export function Designer({ onBack }: DesignerProps) {
               <h3 className="font-semibold text-xs text-gray-700 uppercase tracking-wider mb-3">Summary</h3>
               <div className="space-y-2 text-xs">
                 <div className="flex justify-between"><span className="text-gray-600">Devices:</span><span className="font-semibold">{totalDevices}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600">Connections:</span><span className="font-semibold">{visibleConnections.length}</span></div>
+                {cableBreakdown !== null && (
+                  <>
+                    <div className="flex justify-between"><span className="text-gray-600">Total Cable:</span><span className="font-semibold">{cableBreakdown.total.toFixed(1)} ft</span></div>
+                    {cableBreakdown.LNET > 0 && (
+                      <div className="flex justify-between pl-4"><span className="text-gray-500 text-[10px]">L-Net:</span><span className="text-gray-600">{cableBreakdown.LNET.toFixed(1)} ft</span></div>
+                    )}
+                    {cableBreakdown.KB > 0 && (
+                      <div className="flex justify-between pl-4"><span className="text-gray-500 text-[10px]">K-Bus:</span><span className="text-gray-600">{cableBreakdown.KB.toFixed(1)} ft</span></div>
+                    )}
+                    {cableBreakdown.ETH > 0 && (
+                      <div className="flex justify-between pl-4"><span className="text-gray-500 text-[10px]">Ethernet:</span><span className="text-gray-600">{cableBreakdown.ETH.toFixed(1)} ft</span></div>
+                    )}
+                    {cableBreakdown.POWER > 0 && (
+                      <div className="flex justify-between pl-4"><span className="text-gray-500 text-[10px]">DC Power:</span><span className="text-gray-600">{cableBreakdown.POWER.toFixed(1)} ft</span></div>
+                    )}
+                    {cableBreakdown.AC > 0 && (
+                      <div className="flex justify-between pl-4"><span className="text-gray-500 text-[10px]">AC Power:</span><span className="text-gray-600">{cableBreakdown.AC.toFixed(1)} ft</span></div>
+                    )}
+                  </>
+                )}
                 <div className="flex justify-between"><span className="text-gray-600">Power:</span><span className="font-semibold">{devices.reduce((s, d) => s + (allDevices.find((l) => l.part === d.part)?.power_A || 0), 0).toFixed(2)}A</span></div>
                 <div className="flex justify-between"><span className="text-gray-600">Install Labor:</span><span className="font-semibold">{(() => { const m = devices.reduce((s, d) => s + (allDevices.find((l) => l.part === d.part)?.laborMinutes || 0), 0); return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`; })()}</span></div>
               </div>
@@ -1185,6 +1907,9 @@ export function Designer({ onBack }: DesignerProps) {
               onOpenFullCalc={() => setShowPowerCalc(true)}
             />
 
+// alignment menu helper component defined below
+
+
             <ValidationPanel
               devices={devices}
               connections={connections}
@@ -1193,6 +1918,16 @@ export function Designer({ onBack }: DesignerProps) {
                 if (ids.length > 0) setSelectedId(ids[0]);
               }}
             />
+
+            <div className="mt-6 pt-4 border-t">
+              <h3 className="font-semibold text-xs text-gray-700 uppercase tracking-wider mb-3">Marshall Standard Reference</h3>
+              <div className="space-y-2 text-2xs text-gray-600 bg-gray-50 p-2 rounded">
+                <div><span className="font-semibold">Headend:</span> MSC-1, L2K-1, TB-1, PWR-1, SW-1, CON-1</div>
+                <div><span className="font-semibold">Rooms:</span> RM###-RS-#, RM###-PS-#, RM###-CL-#</div>
+                <div><span className="font-semibold">Buses:</span> KB-A/B/C, LN-1/2/3, ETH, PoE</div>
+                <div><span className="font-semibold">Power:</span> 15VDC, 120VAC (use PWR not PS)</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1205,6 +1940,22 @@ export function Designer({ onBack }: DesignerProps) {
         connections={connections} onSelectDevice={handleAddCompatibleDevice} onConnectToDevice={handleConnectToDevice} getPortUsage={portUsage} getDevicePorts={getDevicePorts} />
       {selectedPalettePart && <SchematicEditorModal isOpen={showSchematicEditor} onClose={() => setShowSchematicEditor(false)} onSave={handleSaveSchematic}
         devicePart={selectedPalettePart} initialPorts={getDevicePorts(selectedPalettePart)} initialSchematic={customSchematics[selectedPalettePart]?.image || DEVICE_DEFS[selectedPalettePart]?.customSchematic} initialDrawElements={customSchematics[selectedPalettePart]?.drawElements || []} />}
+      
+      {alignmentMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setAlignmentMenu(null)} />
+          <div
+            className="fixed z-50 bg-white rounded-lg shadow-2xl border border-gray-300 p-3"
+            style={{ left: alignmentMenu.x, top: alignmentMenu.y }}
+          >
+            <AlignmentSquareMenu
+              count={selectedIds.size}
+              onAlign={(dir) => alignDevices(dir)}
+            />
+          </div>
+        </>
+      )}
+      
       {connectionContextMenu && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setConnectionContextMenu(null)} />
@@ -1270,10 +2021,12 @@ export function Designer({ onBack }: DesignerProps) {
                           <button key={candidate.id} className="w-full px-3 py-1.5 text-left text-sm hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2 transition-colors"
                             onClick={() => {
                               if (availablePort) {
-                                setConnections([...connections, {
-                                  id: crypto.randomUUID(), fromId: portContextMenu.deviceId, fromPort: portContextMenu.portId,
-                                  toId: candidate.id, toPort: availablePort.id, type: portContextMenu.portType,
-                                }]);
+                                const conn = normalizeConnection(
+                                  portContextMenu.deviceId, candidate.id,
+                                  portContextMenu.portId, availablePort.id,
+                                  portContextMenu.portType
+                                );
+                                setConnections([...connections, conn]);
                               }
                               setPortContextMenu(null);
                             }}>
@@ -1300,36 +2053,19 @@ export function Designer({ onBack }: DesignerProps) {
                             const targetPort = targetPorts.find(p => p.type === portContextMenu.portType);
                             setDevices([...devices, newDev]);
                             if (targetPort) {
-                              setConnections([...connections, {
-                                id: crypto.randomUUID(), fromId: portContextMenu.deviceId, fromPort: portContextMenu.portId,
-                                toId: newId, toPort: targetPort.id, type: portContextMenu.portType,
-                              }]);
+                              const conn = normalizeConnection(
+                                portContextMenu.deviceId, newId,
+                                portContextMenu.portId, targetPort.id,
+                                portContextMenu.portType
+                              );
+                              setConnections([...connections, conn]);
                             }
                             setPortContextMenu(null);
                           }}>
-                          <Plus className="w-3.5 h-3.5 text-gray-400" />
-                          {item.label}
+                          <Plus className="w-3.5 h-3.5 text-blue-500" />
+                          <span className="truncate">{item.part}</span>
                         </button>
                       ))}
-                    </>
-                  )}
-                  {isFull && (
-                    <div className="px-3 py-1.5 text-xs text-amber-600 border-t border-gray-100 mt-0.5">Port at capacity</div>
-                  )}
-                  {portConns.length > 0 && (
-                    <>
-                      <div className="border-t border-gray-100 mt-0.5" />
-                      {portConns.map((conn) => {
-                        const otherId = conn.fromId === portContextMenu.deviceId ? conn.toId : conn.fromId;
-                        const otherDev = devices.find((d) => d.id === otherId);
-                        return (
-                          <button key={conn.id} className="w-full px-3 py-1.5 text-left text-sm hover:bg-red-50 flex items-center gap-2 text-red-600 transition-colors"
-                            onClick={() => { setConnections(connections.filter((c) => c.id !== conn.id)); setPortContextMenu(null); }}>
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span className="truncate">Disconnect {otherDev?.name || "device"}</span>
-                          </button>
-                        );
-                      })}
                     </>
                   )}
                 </>
@@ -1338,8 +2074,74 @@ export function Designer({ onBack }: DesignerProps) {
           </div>
         </>
       )}
-      <QuotePanel open={showQuotePanel} onClose={() => setShowQuotePanel(false)} />
+      <QuotePanel 
+        open={showQuotePanel} 
+        onClose={() => setShowQuotePanel(false)}
+        cableBreakdown={cableBreakdown}
+      />
       <PowerCalculator open={showPowerCalc} onClose={() => setShowPowerCalc(false)} />
+    </div>
+  );
+}
+
+// alignment menu helper component
+function AlignmentSquareMenu({
+  onAlign,
+  count,
+}: {
+  onAlign: (dir: "top" | "right" | "bottom" | "left" | "grid") => void;
+  count: number;
+}) {
+  return (
+    <div className="select-none">
+      <div className="text-xs font-semibold text-gray-700 mb-2 text-center">
+        Align {count} devices
+      </div>
+
+      <div className="relative w-28 h-28">
+        <div className="absolute inset-0 rounded-md border-2 border-gray-400 bg-white shadow-sm" />
+
+        <svg className="absolute inset-0" viewBox="0 0 100 100" aria-hidden="true">
+          <line x1="0" y1="0" x2="32" y2="32" stroke="#9ca3af" strokeWidth="2" />
+          <line x1="100" y1="0" x2="68" y2="32" stroke="#9ca3af" strokeWidth="2" />
+          <line x1="0" y1="100" x2="32" y2="68" stroke="#9ca3af" strokeWidth="2" />
+          <line x1="100" y1="100" x2="68" y2="68" stroke="#9ca3af" strokeWidth="2" />
+        </svg>
+
+        <button
+          onClick={() => onAlign("top")}
+          title="Align Top (to topmost edge)"
+          className="absolute left-2 right-2 top-2 h-7 rounded-md border border-transparent hover:border-blue-400 hover:bg-blue-50 transition"
+        />
+        <button
+          onClick={() => onAlign("right")}
+          title="Align Right (to rightmost edge)"
+          className="absolute right-2 top-2 bottom-2 w-7 rounded-md border border-transparent hover:border-blue-400 hover:bg-blue-50 transition"
+        />
+        <button
+          onClick={() => onAlign("bottom")}
+          title="Align Bottom (to bottommost edge)"
+          className="absolute left-2 right-2 bottom-2 h-7 rounded-md border border-transparent hover:border-blue-400 hover:bg-blue-50 transition"
+        />
+        <button
+          onClick={() => onAlign("left")}
+          title="Align Left (to leftmost edge)"
+          className="absolute left-2 top-2 bottom-2 w-7 rounded-md border border-transparent hover:border-blue-400 hover:bg-blue-50 transition"
+        />
+
+        <div className="absolute left-1/2 top-1/2 w-12 h-12 -translate-x-1/2 -translate-y-1/2">
+          <div className="absolute inset-0 rounded-md border-2 border-gray-400 bg-white" />
+          <button
+            onClick={() => onAlign("grid")}
+            title='Grid Align ("Dress Right Dress")'
+            className="absolute inset-1 rounded-md border-2 border-blue-500 bg-blue-50 hover:bg-blue-100 transition"
+          />
+        </div>
+      </div>
+
+      <div className="text-[11px] text-gray-500 mt-2 text-center">
+        Center = Grid (clean rows/columns)
+      </div>
     </div>
   );
 }

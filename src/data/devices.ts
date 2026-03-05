@@ -25,7 +25,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   R5KMTRM: {
-    part: "R5KMTRM", label: "R5KMTRM", w: 90, h: 140,
+    part: "R5KMTRM", label: "R5KMTRM", w: 90, h: 120, // match the standard device height so alignments behave consistently
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.50, limit: 1 },
       { id: "PWR-A", label: "PWR-A", type: "POWER", x: 0.28, y: 0.96, limit: 1 },
@@ -87,7 +87,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ports: [{ id: "KB", label: "KB", type: "KB", x: 0.10, y: 0.50 }],
   },
   R5KCL546: {
-    part: "R5KCL546", label: "R5KCL546", w: 90, h: 140,
+    part: "R5KCL546", label: "R5KCL546", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -100,7 +100,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   R5KCL516: {
-    part: "R5KCL516", label: "R5KCL516", w: 90, h: 140,
+    part: "R5KCL516", label: "R5KCL516", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -113,7 +113,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   R5KCL506: {
-    part: "R5KCL506", label: "R5KCL506", w: 90, h: 140,
+    part: "R5KCL506", label: "R5KCL506", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -126,7 +126,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   CLA246: {
-    part: "CLA246", label: "CLA246", w: 90, h: 140,
+    part: "CLA246", label: "CLA246", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -174,7 +174,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   R5KDC06: {
-    part: "R5KDC06", label: "R5KDC06", w: 90, h: 140,
+    part: "R5KDC06", label: "R5KDC06", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -187,7 +187,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   R5KDC46: {
-    part: "R5KDC46", label: "R5KDC46", w: 90, h: 140,
+    part: "R5KDC46", label: "R5KDC46", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -223,7 +223,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   R5KDC16D: {
-    part: "R5KDC16D", label: "R5KDC16D", w: 90, h: 140,
+    part: "R5KDC16D", label: "R5KDC16D", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -300,7 +300,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ports: [{ id: "KB", label: "KB", type: "KB", x: 0.10, y: 0.50 }],
   },
   R5KDCRC4: {
-    part: "R5KDCRC4", label: "R5KDCRC4", w: 90, h: 140,
+    part: "R5KDCRC4", label: "R5KDCRC4", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -311,7 +311,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   R5KDCRC4S: {
-    part: "R5KDCRC4S", label: "R5KDCRC4S", w: 90, h: 140,
+    part: "R5KDCRC4S", label: "R5KDCRC4S", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -462,7 +462,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ports: [{ id: "KB", label: "KB", type: "KB", x: 0.10, y: 0.50 }],
   },
   DCV100: {
-    part: "DCV100", label: "DCV100", w: 90, h: 140,
+    part: "DCV100", label: "DCV100", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -475,7 +475,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   R4KOUT4R: {
-    part: "R4KOUT4R", label: "R4KOUT4R", w: 90, h: 140,
+    part: "R4KOUT4R", label: "R4KOUT4R", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -509,7 +509,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   CLV122: {
-    part: "CLV122", label: "CLV122", w: 90, h: 140,
+    part: "CLV122", label: "CLV122", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -518,7 +518,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   CLV144: {
-    part: "CLV144", label: "CLV144", w: 90, h: 140,
+    part: "CLV144", label: "CLV144", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -529,7 +529,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   DCA200: {
-    part: "DCA200", label: "DCA200", w: 90, h: 140,
+    part: "DCA200", label: "DCA200", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -542,7 +542,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   R4KOUT4S: {
-    part: "R4KOUT4S", label: "R4KOUT4S", w: 90, h: 140,
+    part: "R4KOUT4S", label: "R4KOUT4S", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -553,7 +553,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   DCA216: {
-    part: "DCA216", label: "DCA216", w: 90, h: 140,
+    part: "DCA216", label: "DCA216", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -566,7 +566,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   CLA214D: {
-    part: "CLA214D", label: "CLA214D", w: 90, h: 140,
+    part: "CLA214D", label: "CLA214D", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -579,7 +579,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   DCA214D: {
-    part: "DCA214D", label: "DCA214D", w: 90, h: 140,
+    part: "DCA214D", label: "DCA214D", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -592,7 +592,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   CLA222: {
-    part: "CLA222", label: "CLA222", w: 90, h: 140,
+    part: "CLA222", label: "CLA222", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -601,7 +601,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   CLA244: {
-    part: "CLA244", label: "CLA244", w: 90, h: 140,
+    part: "CLA244", label: "CLA244", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -612,7 +612,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   CLAR4: {
-    part: "CLAR4", label: "CLAR4", w: 90, h: 140,
+    part: "CLAR4", label: "CLAR4", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },
@@ -623,7 +623,7 @@ export const DEVICE_DEFS: Record<string, DeviceDef> = {
     ],
   },
   CLAR46: {
-    part: "CLAR46", label: "CLAR46", w: 90, h: 140,
+    part: "CLAR46", label: "CLAR46", w: 90, h: 120,
     ports: [
       { id: "KB_IN", label: "KB-In", type: "KB", x: 0.06, y: 0.14 },
       { id: "KB_OUT", label: "KB-Out", type: "KB", x: 0.06, y: 0.86 },

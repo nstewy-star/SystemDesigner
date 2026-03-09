@@ -281,7 +281,7 @@ export function Designer({ onBack }: DesignerProps) {
     const def = DEVICE_DEFS[d.part];
     const baseW = def?.w ?? 140;
     const baseH = def?.h ?? 80;
-    const scale = (currentProject?.device_scale ?? 100) / 100;
+    const scale = (currentProject?.device_scale ?? 100) / 200;
     return { w: baseW * scale, h: baseH * scale };
   };
 
@@ -1778,7 +1778,7 @@ export function Designer({ onBack }: DesignerProps) {
                   <Label className="text-sm text-gray-600 mb-2 block">Walls Opacity ({wallsOpacity}%)</Label>
                   <input type="range" min="0" max="100" value={wallsOpacity} onChange={(e) => updateProject({ walls_opacity: parseInt(e.target.value) })} className="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer" />
                 </div>
-                <Button variant="outline" size="sm" className="w-full text-blue-600" onClick={() => updateProject({ background_opacity: 60, device_opacity: 100, device_scale: 50, walls_opacity: 90, show_device_names: true, show_ports: true })}>Restore Default</Button>
+                <Button variant="outline" size="sm" className="w-full text-blue-600" onClick={() => updateProject({ background_opacity: 60, device_opacity: 100, device_scale: 100, walls_opacity: 90, show_device_names: true, show_ports: true })}>Restore Default</Button>
               </div>
             </div>
           </div>

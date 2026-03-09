@@ -99,6 +99,8 @@ export type FloorPlan = {
   name: string;
   imageUrl: string;
   opacity: number;
+  naturalWidth?: number;
+  naturalHeight?: number;
 };
 
 export type ProjectType = "new-r5k" | "upgrade-r4k-to-r5k" | "new-r4k" | "mixed";

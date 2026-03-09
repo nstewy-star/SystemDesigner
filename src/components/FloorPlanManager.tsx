@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
-import { Upload, Trash2, Eye, EyeOff, ChevronDown, Pencil, Check, Image, Layers } from "lucide-react";
+import { Upload, Trash2, Eye, EyeOff, ChevronDown, Pencil, Check, Image, Layers, Loader2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { isPdfDataUrl, pdfToImageDataUrl } from "../lib/pdfToImage";
 import type { FloorPlan } from "../types";
 
 interface FloorPlanManagerProps {
@@ -9,7 +10,7 @@ interface FloorPlanManagerProps {
   activeFloorPlanId: string | null;
   legacyImageUrl: string | null;
   legacyOpacity: number;
-  onAddFloorPlan: (name: string, imageUrl: string) => void;
+  onAddFloorPlan: (name: string, imageUrl: string, naturalWidth?: number, naturalHeight?: number) => void;
   onRemoveFloorPlan: (id: string) => void;
   onSetActiveFloorPlan: (id: string | null) => void;
   onRenameFloorPlan: (id: string, name: string) => void;
@@ -34,6 +35,7 @@ export function FloorPlanManager({
   const [isOpen, setIsOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const hasLegacy = !!legacyImageUrl && floorPlans.length === 0;
@@ -44,7 +46,16 @@ export function FloorPlanManager({
       ? "Uploaded Plan"
       : "No Floor Plan";
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const loadImageDimensions = (dataUrl: string): Promise<{ width: number; height: number }> => {
+    return new Promise((resolve) => {
+      const img = new window.Image();
+      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      img.onerror = () => resolve({ width: 0, height: 0 });
+      img.src = dataUrl;
+    });
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -52,13 +63,27 @@ export function FloorPlanManager({
       onMigrateLegacy();
     }
 
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const imageUrl = ev.target?.result as string;
-      const name = file.name.replace(/\.[^/.]+$/, "").slice(0, 40) || "Floor Plan";
-      onAddFloorPlan(name, imageUrl);
-    };
-    reader.readAsDataURL(file);
+    const name = file.name.replace(/\.[^/.]+$/, "").slice(0, 40) || "Floor Plan";
+    setIsProcessing(true);
+
+    try {
+      const reader = new FileReader();
+      const rawDataUrl = await new Promise<string>((resolve) => {
+        reader.onload = (ev) => resolve(ev.target?.result as string);
+        reader.readAsDataURL(file);
+      });
+
+      let imageUrl = rawDataUrl;
+      if (isPdfDataUrl(rawDataUrl)) {
+        imageUrl = await pdfToImageDataUrl(rawDataUrl);
+      }
+
+      const dims = await loadImageDimensions(imageUrl);
+      onAddFloorPlan(name, imageUrl, dims.width, dims.height);
+    } finally {
+      setIsProcessing(false);
+    }
+
     e.target.value = "";
   };
 
@@ -101,8 +126,9 @@ export function FloorPlanManager({
           className="h-8 px-2"
           onClick={() => fileInputRef.current?.click()}
           title="Upload floor plan"
+          disabled={isProcessing}
         >
-          <Upload className="w-3.5 h-3.5" />
+          {isProcessing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
         </Button>
       </div>
 

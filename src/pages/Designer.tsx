@@ -99,6 +99,7 @@ export function Designer({ onBack }: DesignerProps) {
   const [canvasSelectionBox, setCanvasSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
   const [spacebarPressed, setSpacebarPressed] = useState(false);
   const [highlightedDeviceIds, setHighlightedDeviceIds] = useState<Set<string>>(new Set());
+  const [bgNaturalSize, setBgNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   // undo history buffer (devices+connections)
   const historyRef = useRef<{devices: Device[]; connections: Connection[]}[]>([]);
@@ -228,6 +229,17 @@ export function Designer({ onBack }: DesignerProps) {
   useEffect(() => {
     hasNormalized.current = false;
   }, [currentProject?.id]);
+
+  useEffect(() => {
+    if (!bgDataUrl) { setBgNaturalSize(null); return; }
+    if (activeFloorPlan?.naturalWidth && activeFloorPlan?.naturalHeight) {
+      setBgNaturalSize({ w: activeFloorPlan.naturalWidth, h: activeFloorPlan.naturalHeight });
+      return;
+    }
+    const img = new window.Image();
+    img.onload = () => setBgNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
+    img.src = bgDataUrl;
+  }, [bgDataUrl, activeFloorPlan?.naturalWidth, activeFloorPlan?.naturalHeight]);
 
   const pushHistory = () => {
     historyRef.current.unshift({ devices: [...devices], connections: [...connections] });
@@ -700,9 +712,9 @@ export function Designer({ onBack }: DesignerProps) {
     reader.readAsDataURL(file);
   };
 
-  const addFloorPlan = (name: string, imageUrl: string) => {
+  const addFloorPlan = (name: string, imageUrl: string, naturalWidth?: number, naturalHeight?: number) => {
     const id = crypto.randomUUID();
-    const newPlan: FloorPlan = { id, name, imageUrl, opacity: 60 };
+    const newPlan: FloorPlan = { id, name, imageUrl, opacity: 60, naturalWidth, naturalHeight };
     const updated = [...floorPlans, newPlan];
     updateProject({ floor_plans: updated, active_floor_plan_id: id });
   };
@@ -1587,8 +1599,40 @@ export function Designer({ onBack }: DesignerProps) {
             if (draggingConnection) setDraggingConnection((prev) => prev ? { ...prev, mouseX: x, mouseY: y } : null);
           }}
         >
-          <div style={{ width: 5000 * zoom, height: 5000 * zoom, position: "relative", transformOrigin: "0 0", transform: `scale(${zoom})` }}>
-          {bgDataUrl && <img src={bgDataUrl} alt="Floor plan" className="absolute inset-0 pointer-events-none" style={{ opacity: bgOpacity / 100, width: 5000, height: 5000, objectFit: "contain", objectPosition: "top left" }} />}
+          <div style={{ width: 5000 * zoom, height: 5000 * zoom, position: "relative", transformOrigin: "0 0", transform: `scale(${zoom})`, willChange: "transform" }}>
+          {bgDataUrl && (() => {
+            const nw = bgNaturalSize?.w || 0;
+            const nh = bgNaturalSize?.h || 0;
+            if (nw > 0 && nh > 0) {
+              const s = Math.min(5000 / nw, 5000 / nh, 1);
+              return (
+                <img
+                  src={bgDataUrl}
+                  alt="Floor plan"
+                  className="absolute top-0 left-0 pointer-events-none"
+                  style={{
+                    opacity: bgOpacity / 100,
+                    width: Math.round(nw * s),
+                    height: Math.round(nh * s),
+                    imageRendering: "auto",
+                  }}
+                />
+              );
+            }
+            return (
+              <img
+                src={bgDataUrl}
+                alt="Floor plan"
+                className="absolute top-0 left-0 pointer-events-none"
+                style={{
+                  opacity: bgOpacity / 100,
+                  maxWidth: 5000,
+                  maxHeight: 5000,
+                  imageRendering: "auto",
+                }}
+              />
+            );
+          })()}
           <svg className="absolute inset-0 pointer-events-none z-0" style={{ width: 5000, height: 5000 }}>
             {walls.map((wall) => <line key={wall.id} x1={wall.x1} y1={wall.y1} x2={wall.x2} y2={wall.y2} stroke="#1e293b" strokeWidth={4} opacity={wallsOpacity / 100} />)}
             {drawingWall && wallPreviewEnd && <line x1={drawingWall.x} y1={drawingWall.y} x2={wallPreviewEnd.x} y2={wallPreviewEnd.y} stroke="#3b82f6" strokeWidth={4} strokeDasharray="8 4" opacity={0.6} />}

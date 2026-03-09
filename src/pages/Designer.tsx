@@ -6,9 +6,9 @@ import { Label } from "../components/ui/label";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import {
-  Plus, Download, Link2, MousePointer2, Trash2, Layers,
-  FileSpreadsheet, Wand2, Zap, AlertCircle, X, Star, Settings,
-  Square, ArrowLeft, DollarSign, Calculator, ZoomIn, ZoomOut, Maximize,
+  Plus, Trash2, Layers,
+  Wand2, Zap, AlertCircle, X, Star, Settings,
+  ArrowLeft, Link2,
 } from "lucide-react";
 import { DeviceIcon } from "../components/DeviceIcon";
 import { DeviceSVG } from "../components/DeviceSVG";
@@ -17,7 +17,8 @@ import { BOMModal } from "../components/BOMModal";
 import { CompatibleDevicesModal } from "../components/CompatibleDevicesModal";
 import { SchematicEditorModal } from "../components/SchematicEditorModal";
 import { ValidationPanel } from "../components/ValidationPanel";
-import { FloorPlanManager } from "../components/FloorPlanManager";
+import { CanvasBackground } from "../components/CanvasBackground";
+import { DesignerBottomBar } from "../components/DesignerBottomBar";
 import { PowerSummaryWidget } from "../components/power/PowerSummaryWidget";
 import { PowerCalculator } from "./PowerCalculator";
 import { QuotePanel } from "./QuotePanel";
@@ -26,6 +27,7 @@ import { useProject } from "../contexts/ProjectContext";
 import { DEVICE_DEFS, DEVICE_LIBRARY, TYPE_COLOR } from "../data/devices";
 import { getCompatibleDevices, validateConnection, isDuplicateConnection } from "../lib/connectionRules";
 import { routeConnection, getConnectionEndpoints, getPortPosition } from "../lib/connectionRouting";
+import { useCanvasViewport } from "../lib/useCanvasViewport";
 import type {
   Device, Connection, PortType, PortDef, DrawElement, DeviceDef,
   DeviceLibraryItem, DeviceKit, ProjectType, FloorPlan,
@@ -94,13 +96,17 @@ export function Designer({ onBack }: DesignerProps) {
   const [draggingConnection, setDraggingConnection] = useState<{ fromId: string; fromPort: string; mouseX: number; mouseY: number } | null>(null);
   const [showQuotePanel, setShowQuotePanel] = useState(false);
   const [showPowerCalc, setShowPowerCalc] = useState(false);
-  const [zoom, setZoom] = useState(1);
   const [paletteSelectionBox, setPaletteSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
   const [canvasSelectionBox, setCanvasSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
   const [spacebarPressed, setSpacebarPressed] = useState(false);
   const [highlightedDeviceIds, setHighlightedDeviceIds] = useState<Set<string>>(new Set());
-  const [bgNaturalSize, setBgNaturalSize] = useState<{ w: number; h: number } | null>(null);
-  const canvasRef = useRef<HTMLDivElement>(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  const {
+    viewState, containerRef: canvasRef, screenToWorld, worldToScreen,
+    handleWheel: viewportWheel, startPan, updatePan, endPan,
+    setZoomLevel, resetView, isPanning,
+  } = useCanvasViewport();
+  const zoom = viewState.zoom;
   // undo history buffer (devices+connections)
   const historyRef = useRef<{devices: Device[]; connections: Connection[]}[]>([]);
   const skipHistoryRef = useRef(false);
@@ -114,12 +120,7 @@ export function Designer({ onBack }: DesignerProps) {
   const toolBeforePortClick = useRef<"select" | "connect" | "wall" | null>(null);
 
   const canvasToWorld = (clientX: number, clientY: number) => {
-    if (!canvasRef.current) return { x: 0, y: 0 };
-    const rect = canvasRef.current.getBoundingClientRect();
-    return {
-      x: (clientX - rect.left + canvasRef.current.scrollLeft) / zoom,
-      y: (clientY - rect.top + canvasRef.current.scrollTop) / zoom,
-    };
+    return screenToWorld(clientX, clientY);
   };
 
   // Signal flow hierarchy - lower number = upstream (source)
@@ -231,15 +232,17 @@ export function Designer({ onBack }: DesignerProps) {
   }, [currentProject?.id]);
 
   useEffect(() => {
-    if (!bgDataUrl) { setBgNaturalSize(null); return; }
-    if (activeFloorPlan?.naturalWidth && activeFloorPlan?.naturalHeight) {
-      setBgNaturalSize({ w: activeFloorPlan.naturalWidth, h: activeFloorPlan.naturalHeight });
-      return;
-    }
-    const img = new window.Image();
-    img.onload = () => setBgNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
-    img.src = bgDataUrl;
-  }, [bgDataUrl, activeFloorPlan?.naturalWidth, activeFloorPlan?.naturalHeight]);
+    const el = canvasRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setCanvasSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
+    });
+    obs.observe(el);
+    setCanvasSize({ width: el.clientWidth, height: el.clientHeight });
+    return () => obs.disconnect();
+  }, [canvasRef]);
 
   const pushHistory = () => {
     historyRef.current.unshift({ devices: [...devices], connections: [...connections] });
@@ -304,20 +307,12 @@ export function Designer({ onBack }: DesignerProps) {
     return Math.min(6, Math.max(2, bigGaps + 1));
   };
 
-  const handleWheel = useCallback((e: WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.1 : 0.1;
-      setZoom((prev) => Math.min(3, Math.max(0.15, prev + delta)));
-    }
-  }, []);
-
   useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
-    el.addEventListener("wheel", handleWheel, { passive: false });
-    return () => el.removeEventListener("wheel", handleWheel);
-  }, [handleWheel]);
+    el.addEventListener("wheel", viewportWheel, { passive: false });
+    return () => el.removeEventListener("wheel", viewportWheel);
+  }, [viewportWheel]);
 
   const allDevices = useMemo(() => [...DEVICE_LIBRARY, ...customDevices], [customDevices]);
 
@@ -528,14 +523,14 @@ export function Designer({ onBack }: DesignerProps) {
       }
       setSelectedId(id);
       setSelectedIds(new Set());
-      const startX = e.clientX;
-      const startY = e.clientY;
+      const startWorld = canvasToWorld(e.clientX, e.clientY);
       const dev = devices.find((d) => d.id === id);
       if (!dev) return;
       const origX = dev.x;
       const origY = dev.y;
       const move = (me: MouseEvent) => {
-        setDevices(devices.map((d) => d.id === id ? { ...d, x: origX + (me.clientX - startX) / zoom, y: origY + (me.clientY - startY) / zoom } : d));
+        const cur = canvasToWorld(me.clientX, me.clientY);
+        setDevices(devices.map((d) => d.id === id ? { ...d, x: origX + (cur.x - startWorld.x), y: origY + (cur.y - startWorld.y) } : d));
       };
       const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
       window.addEventListener("mousemove", move);
@@ -1146,38 +1141,25 @@ export function Designer({ onBack }: DesignerProps) {
 
   useEffect(() => {
     if (!canvasRef.current) return;
-    
-    let isPanning = false;
-    let panStartX = 0;
-    let panStartY = 0;
-    let scrollStartX = 0;
-    let scrollStartY = 0;
-    
+
     const handleMouseDown = (e: MouseEvent) => {
-      if (!spacebarPressed || !canvasRef.current) return;
-      isPanning = true;
-      panStartX = e.clientX;
-      panStartY = e.clientY;
-      scrollStartX = canvasRef.current.scrollLeft;
-      scrollStartY = canvasRef.current.scrollTop;
+      if (!spacebarPressed) return;
+      startPan(e.clientX, e.clientY);
     };
-    
+
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isPanning || !canvasRef.current) return;
-      const deltaX = e.clientX - panStartX;
-      const deltaY = e.clientY - panStartY;
-      canvasRef.current.scrollLeft = scrollStartX - deltaX;
-      canvasRef.current.scrollTop = scrollStartY - deltaY;
+      if (!isPanning.current) return;
+      updatePan(e.clientX, e.clientY);
     };
-    
+
     const handleMouseUp = () => {
-      isPanning = false;
+      endPan();
     };
-    
+
     canvasRef.current.addEventListener("mousedown", handleMouseDown);
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
-    
+
     return () => {
       if (canvasRef.current) {
         canvasRef.current.removeEventListener("mousedown", handleMouseDown);
@@ -1185,7 +1167,7 @@ export function Designer({ onBack }: DesignerProps) {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [spacebarPressed]);
+  }, [spacebarPressed, startPan, updatePan, endPan, isPanning]);
 
   useEffect(() => {
     const handlePaletteMouseDown = (e: MouseEvent) => {
@@ -1379,20 +1361,20 @@ export function Designer({ onBack }: DesignerProps) {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
-      <div className="sticky top-0 z-10 bg-white border-b shadow-sm px-4 py-2.5 flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={handleBack} className="mr-1">
+      <div className="sticky top-0 z-10 bg-gray-900 border-b border-gray-700 px-4 py-2 flex items-center gap-3">
+        <Button variant="ghost" size="sm" onClick={handleBack} className="mr-1 text-gray-300 hover:text-white hover:bg-gray-800">
           <ArrowLeft className="w-4 h-4" />
         </Button>
-        <h1 className="text-lg font-bold text-gray-800">System Designer</h1>
+        <h1 className="text-sm font-bold text-white">System Designer</h1>
         {currentProject && (
-          <div className="text-sm text-gray-600">
-            <span className="font-semibold">{currentProject.customer_name}</span>
+          <div className="text-xs text-gray-400">
+            <span className="font-semibold text-gray-300">{currentProject.customer_name}</span>
             {" / "}
             <span>{currentProject.site_name}</span>
           </div>
         )}
         <select value={projectType} onChange={(e) => updateProject({ project_type: e.target.value as ProjectType })}
-          className="h-8 rounded-md border border-gray-300 bg-white px-3 text-sm shadow-sm">
+          className="h-7 rounded border border-gray-600 bg-gray-800 px-2 text-xs text-gray-300">
           <option value="new-r5k">New R5K System</option>
           <option value="upgrade-r4k-to-r5k">Upgrade R4K → R5K</option>
           <option value="new-r4k">New R4K System</option>
@@ -1400,41 +1382,7 @@ export function Designer({ onBack }: DesignerProps) {
         </select>
         <div className="flex-1" />
         <input ref={fileInputRef} type="file" accept="image/*,.pdf" className="hidden" onChange={handleFileUpload} />
-        <FloorPlanManager
-          floorPlans={floorPlans}
-          activeFloorPlanId={activeFloorPlanId}
-          legacyImageUrl={currentProject?.background_image_url || null}
-          legacyOpacity={currentProject?.background_opacity ?? 60}
-          onAddFloorPlan={addFloorPlan}
-          onRemoveFloorPlan={removeFloorPlan}
-          onSetActiveFloorPlan={(id) => updateProject({ active_floor_plan_id: id })}
-          onRenameFloorPlan={renameFloorPlan}
-          onSetFloorPlanOpacity={setFloorPlanOpacity}
-          onMigrateLegacy={migrateLegacyFloorPlan}
-          onRemoveLegacy={removeLegacyFloorPlan}
-        />
-        <div className="h-5 w-px bg-gray-300" />
-        <Button variant={tool === "select" ? "default" : "outline"} size="sm" onClick={() => { setTool("select"); setConnectFrom(null); }}><MousePointer2 className="w-4 h-4" /></Button>
-        <Button variant={tool === "connect" ? "default" : "outline"} size="sm" onClick={() => setTool("connect")}><Link2 className="w-4 h-4" /></Button>
-        <Button variant={tool === "wall" ? "default" : "outline"} size="sm" onClick={() => { setTool("wall"); setConnectFrom(null); }}><Square className="w-4 h-4" /></Button>
-        <div className="h-5 w-px bg-gray-300" />
-        <Button variant={showEnvironmentPanel ? "default" : "outline"} size="sm" onClick={() => setShowEnvironmentPanel(!showEnvironmentPanel)}><Settings className="w-4 h-4" /></Button>
-        <div className="h-5 w-px bg-gray-300" />
-        <div className="flex items-center gap-1">
-          <Button variant="outline" size="sm" className="h-8 px-1.5" onClick={() => setZoom((z) => Math.max(0.15, z - 0.15))}><ZoomOut className="w-3.5 h-3.5" /></Button>
-          <button onClick={() => setZoom(1)} className="text-xs font-medium text-gray-600 hover:text-gray-900 min-w-[42px] text-center tabular-nums">{Math.round(zoom * 100)}%</button>
-          <Button variant="outline" size="sm" className="h-8 px-1.5" onClick={() => setZoom((z) => Math.min(3, z + 0.15))}><ZoomIn className="w-3.5 h-3.5" /></Button>
-          <Button variant="outline" size="sm" className="h-8 px-1.5" onClick={() => setZoom(1)} title="Reset zoom"><Maximize className="w-3.5 h-3.5" /></Button>
-        </div>
-        <div className="h-5 w-px bg-gray-300" />
         <input type="file" accept="application/json" className="hidden" id="import-input" onChange={importDesign} />
-        <Button variant="outline" size="sm" onClick={() => document.getElementById("import-input")?.click()}><Plus className="w-4 h-4 mr-1" /> Import</Button>
-        <Button variant="outline" size="sm" onClick={exportDesign}><Download className="w-4 h-4 mr-1" /> Export</Button>
-        <Button variant="outline" size="sm" onClick={() => setShowBomModal(true)}><FileSpreadsheet className="w-4 h-4 mr-1" /> BOM</Button>
-        <Button variant="outline" size="sm" onClick={() => setShowQuotePanel(true)}><DollarSign className="w-4 h-4 mr-1" /> Quote</Button>
-        <Button variant="outline" size="sm" onClick={() => setShowPowerCalc(true)}><Calculator className="w-4 h-4 mr-1" /> Power</Button>
-        <div className="h-5 w-px bg-gray-300" />
-        <Button variant="outline" size="sm" onClick={autoAssignLNet}><Wand2 className="w-4 h-4 mr-1" /> Auto L-Net</Button>
       </div>
 
       <div className="flex-1 flex overflow-hidden">
@@ -1571,7 +1519,7 @@ export function Designer({ onBack }: DesignerProps) {
 
         {/* CENTER CANVAS */}
         <div
-          className={`flex-1 overflow-auto relative bg-gray-100 select-none ${spacebarPressed ? "cursor-grab active:cursor-grabbing" : ""} ${tool === "connect" || tool === "wall" ? "cursor-crosshair" : ""}`}
+          className={`flex-1 relative bg-gray-800 select-none overflow-hidden ${spacebarPressed ? "cursor-grab active:cursor-grabbing" : ""} ${tool === "connect" || tool === "wall" ? "cursor-crosshair" : ""}`}
           ref={canvasRef} onDragOver={onCanvasDragOver} onDrop={onCanvasDrop}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -1581,7 +1529,6 @@ export function Designer({ onBack }: DesignerProps) {
           }}
           onDoubleClick={(e) => { if (!copiedDevice || !canvasRef.current) return; const { x, y } = canvasToWorld(e.clientX, e.clientY); setDevices([...devices, { ...copiedDevice, id: crypto.randomUUID(), name: `${copiedDevice.part}-${devices.length + 1}`, x, y, floorPlanId: activeFloorPlanId || undefined }]); }}
           onClick={(e) => {
-            // Clear signal path highlight if clicking on canvas
             if (highlightedDeviceIds.size > 0 && e.target === canvasRef.current) {
               setHighlightedDeviceIds(new Set());
               return;
@@ -1599,181 +1546,155 @@ export function Designer({ onBack }: DesignerProps) {
             if (draggingConnection) setDraggingConnection((prev) => prev ? { ...prev, mouseX: x, mouseY: y } : null);
           }}
         >
-          <div style={{ width: 5000 * zoom, height: 5000 * zoom, position: "relative", transformOrigin: "0 0", transform: `scale(${zoom})`, willChange: "transform" }}>
-          {bgDataUrl && (() => {
-            const nw = bgNaturalSize?.w || 0;
-            const nh = bgNaturalSize?.h || 0;
-            if (nw > 0 && nh > 0) {
-              const s = Math.min(5000 / nw, 5000 / nh, 1);
-              return (
-                <img
-                  src={bgDataUrl}
-                  alt="Floor plan"
-                  className="absolute top-0 left-0 pointer-events-none"
-                  style={{
-                    opacity: bgOpacity / 100,
-                    width: Math.round(nw * s),
-                    height: Math.round(nh * s),
-                    imageRendering: "auto",
-                  }}
-                />
-              );
-            }
-            return (
-              <img
-                src={bgDataUrl}
-                alt="Floor plan"
-                className="absolute top-0 left-0 pointer-events-none"
-                style={{
-                  opacity: bgOpacity / 100,
-                  maxWidth: 5000,
-                  maxHeight: 5000,
-                  imageRendering: "auto",
-                }}
-              />
-            );
-          })()}
-          <svg className="absolute inset-0 pointer-events-none z-0" style={{ width: 5000, height: 5000 }}>
-            {walls.map((wall) => <line key={wall.id} x1={wall.x1} y1={wall.y1} x2={wall.x2} y2={wall.y2} stroke="#1e293b" strokeWidth={4} opacity={wallsOpacity / 100} />)}
-            {drawingWall && wallPreviewEnd && <line x1={drawingWall.x} y1={drawingWall.y} x2={wallPreviewEnd.x} y2={wallPreviewEnd.y} stroke="#3b82f6" strokeWidth={4} strokeDasharray="8 4" opacity={0.6} />}
-            {(() => {
-              const groups = new Map<string, Connection[]>();
-              visibleConnections.forEach((c) => {
-                const pair = [c.fromId + ":" + c.fromPort, c.toId + ":" + c.toPort].sort().join("|");
-                if (!groups.has(pair)) groups.set(pair, []);
-                groups.get(pair)!.push(c);
-              });
-              return Array.from(groups.entries()).map(([groupKey, groupConns]) => {
-                const first = groupConns[0];
-                const coords = getLineCoords(first);
-                if (!coords) return null;
-                const pathData = getRoutedPath(first);
-                if (!pathData) return null;
-                const midX = (coords.x1 + coords.x2) / 2;
-                const midY = (coords.y1 + coords.y2) / 2;
-                const isHovered = groupConns.some((c) => c.id === hoveredConnection);
-                // Check if connection is in highlighted signal path
-                const isInHighlight = highlightedDeviceIds.size > 0 && groupConns.some((c) => 
-                  highlightedDeviceIds.has(c.fromId) && highlightedDeviceIds.has(c.toId)
-                );
-                const connOpacity = highlightedDeviceIds.size > 0 ? (isInHighlight ? 1 : 0.15) : 1;
-                return (
-                  <g key={groupKey} style={{ opacity: connOpacity }}>
-                    <path d={pathData} stroke={getLineColor(first.type)} strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" fill="none" className="pointer-events-auto cursor-pointer opacity-0 hover:opacity-30 transition-opacity"
-                      onMouseEnter={() => setHoveredConnection(first.id)} onMouseLeave={() => setHoveredConnection(null)}
-                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setConnectionContextMenu({ x: e.clientX, y: e.clientY, connectionId: first.id }); }} />
-                    <path d={pathData} stroke={getLineColor(first.type)} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" fill="none" className="pointer-events-none" />
-                    {groupConns.length > 1 && (
-                      <g>
-                        <circle cx={midX} cy={midY} r={12} fill="#3b82f6" stroke="white" strokeWidth={2} />
-                        <text x={midX} y={midY} fontSize={12} fontWeight="700" fill="white" textAnchor="middle" dominantBaseline="middle">{groupConns.length}</text>
-                      </g>
-                    )}
-                    {isHovered && (
-                      <g>
-                        {groupConns.map((conn, idx) => {
-                          const from = devices.find((d) => d.id === conn.fromId);
-                          const to = devices.find((d) => d.id === conn.toId);
-                          return <text key={conn.id} x={midX} y={midY - 25 - idx * 18} fontSize={13} fontWeight="600" fill="#1f2937" textAnchor="middle" style={{ paintOrder: "stroke", stroke: "white", strokeWidth: 4 }}>{from && to ? `${from.name} (${conn.fromPort}) → ${to.name} (${conn.toPort})` : ""}</text>;
-                        })}
-                        {(() => { const len = calculateCableLength(coords.x1, coords.y1, coords.x2, coords.y2); return len.feet ? <text x={midX} y={midY + 25} fontSize={12} fontWeight="500" fill="#059669" textAnchor="middle" style={{ paintOrder: "stroke", stroke: "white", strokeWidth: 3 }}>{len.feet.toFixed(1)}ft</text> : null; })()}
-                      </g>
-                    )}
-                  </g>
-                );
-              });
-            })()}
-            {draggingConnection && (() => {
-              const fromDev = devices.find((d) => d.id === draggingConnection.fromId);
-              if (!fromDev) return null;
-              const def = DEVICE_DEFS[fromDev.part];
-              if (!def) return null;
-              const ports = customSchematics[fromDev.part]?.ports || def.ports;
-              const port = ports.find((p) => p.id === draggingConnection.fromPort);
-              if (!port) return null;
-              const pos = getPortPosition(fromDev, draggingConnection.fromPort, def, ports, deviceScale);
-              const color = TYPE_COLOR[port.type] || "#6b7280";
-              return <path d={getStraightPath(pos.x, pos.y, draggingConnection.mouseX, draggingConnection.mouseY)} stroke={color} strokeWidth={2} strokeDasharray="8 4" strokeLinecap="round" fill="none" opacity={0.7} />;
-            })()}
-          </svg>
+          <CanvasBackground
+            viewState={viewState}
+            imageUrl={bgDataUrl}
+            opacity={bgOpacity}
+            containerWidth={canvasSize.width}
+            containerHeight={canvasSize.height}
+          />
 
-          {visibleDevices.map((device) => {
-            const def = DEVICE_DEFS[device.part];
-            const isSelected = device.id === selectedId;
-            const isInMulti = selectedIds.has(device.id);
-            if (!def) {
-              return (
-                <Card key={device.id} className={`absolute cursor-move transition-shadow ${isSelected ? "ring-2 ring-blue-500 shadow-lg" : isInMulti ? "ring-2 ring-green-400 shadow-lg" : "shadow"}`}
-                  style={{ left: device.x, top: device.y, width: 140 }}
-                  onMouseDown={(e) => onDeviceMouseDown(e, device.id)} onContextMenu={(e) => { e.preventDefault(); setCopiedDevice(device); }}>
-                  <CardContent className="p-2 flex items-center gap-2">
-                    <DeviceIcon part={device.part} className="w-6 h-6 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-semibold text-gray-800 truncate">{device.part}</div>
-                      <div className="text-xs text-gray-500 truncate">{device.name}</div>
+          <div className="absolute inset-0 pointer-events-none" style={{ overflow: "hidden" }}>
+            <div style={{ position: "absolute", left: 0, top: 0, transformOrigin: "0 0", transform: `translate(${viewState.offsetX}px, ${viewState.offsetY}px) scale(${zoom})`, pointerEvents: "auto" }}>
+              <svg className="absolute pointer-events-none z-0" style={{ width: 10000, height: 10000, left: -5000, top: -5000, overflow: "visible" }}>
+                {walls.map((wall) => <line key={wall.id} x1={wall.x1} y1={wall.y1} x2={wall.x2} y2={wall.y2} stroke="#1e293b" strokeWidth={4} opacity={wallsOpacity / 100} />)}
+                {drawingWall && wallPreviewEnd && <line x1={drawingWall.x} y1={drawingWall.y} x2={wallPreviewEnd.x} y2={wallPreviewEnd.y} stroke="#3b82f6" strokeWidth={4} strokeDasharray="8 4" opacity={0.6} />}
+                {(() => {
+                  const groups = new Map<string, Connection[]>();
+                  visibleConnections.forEach((c) => {
+                    const pair = [c.fromId + ":" + c.fromPort, c.toId + ":" + c.toPort].sort().join("|");
+                    if (!groups.has(pair)) groups.set(pair, []);
+                    groups.get(pair)!.push(c);
+                  });
+                  return Array.from(groups.entries()).map(([groupKey, groupConns]) => {
+                    const first = groupConns[0];
+                    const coords = getLineCoords(first);
+                    if (!coords) return null;
+                    const pathData = getRoutedPath(first);
+                    if (!pathData) return null;
+                    const midX = (coords.x1 + coords.x2) / 2;
+                    const midY = (coords.y1 + coords.y2) / 2;
+                    const isHovered = groupConns.some((c) => c.id === hoveredConnection);
+                    const isInHighlight = highlightedDeviceIds.size > 0 && groupConns.some((c) =>
+                      highlightedDeviceIds.has(c.fromId) && highlightedDeviceIds.has(c.toId)
+                    );
+                    const connOpacity = highlightedDeviceIds.size > 0 ? (isInHighlight ? 1 : 0.15) : 1;
+                    return (
+                      <g key={groupKey} style={{ opacity: connOpacity }}>
+                        <path d={pathData} stroke={getLineColor(first.type)} strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" fill="none" className="pointer-events-auto cursor-pointer opacity-0 hover:opacity-30 transition-opacity"
+                          onMouseEnter={() => setHoveredConnection(first.id)} onMouseLeave={() => setHoveredConnection(null)}
+                          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setConnectionContextMenu({ x: e.clientX, y: e.clientY, connectionId: first.id }); }} />
+                        <path d={pathData} stroke={getLineColor(first.type)} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" fill="none" className="pointer-events-none" />
+                        {groupConns.length > 1 && (
+                          <g>
+                            <circle cx={midX} cy={midY} r={12} fill="#3b82f6" stroke="white" strokeWidth={2} />
+                            <text x={midX} y={midY} fontSize={12} fontWeight="700" fill="white" textAnchor="middle" dominantBaseline="middle">{groupConns.length}</text>
+                          </g>
+                        )}
+                        {isHovered && (
+                          <g>
+                            {groupConns.map((conn, idx) => {
+                              const from = devices.find((d) => d.id === conn.fromId);
+                              const to = devices.find((d) => d.id === conn.toId);
+                              return <text key={conn.id} x={midX} y={midY - 25 - idx * 18} fontSize={13} fontWeight="600" fill="#1f2937" textAnchor="middle" style={{ paintOrder: "stroke", stroke: "white", strokeWidth: 4 }}>{from && to ? `${from.name} (${conn.fromPort}) → ${to.name} (${conn.toPort})` : ""}</text>;
+                            })}
+                            {(() => { const len = calculateCableLength(coords.x1, coords.y1, coords.x2, coords.y2); return len.feet ? <text x={midX} y={midY + 25} fontSize={12} fontWeight="500" fill="#059669" textAnchor="middle" style={{ paintOrder: "stroke", stroke: "white", strokeWidth: 3 }}>{len.feet.toFixed(1)}ft</text> : null; })()}
+                          </g>
+                        )}
+                      </g>
+                    );
+                  });
+                })()}
+                {draggingConnection && (() => {
+                  const fromDev = devices.find((d) => d.id === draggingConnection.fromId);
+                  if (!fromDev) return null;
+                  const def = DEVICE_DEFS[fromDev.part];
+                  if (!def) return null;
+                  const ports = customSchematics[fromDev.part]?.ports || def.ports;
+                  const port = ports.find((p) => p.id === draggingConnection.fromPort);
+                  if (!port) return null;
+                  const pos = getPortPosition(fromDev, draggingConnection.fromPort, def, ports, deviceScale);
+                  const color = TYPE_COLOR[port.type] || "#6b7280";
+                  return <path d={getStraightPath(pos.x, pos.y, draggingConnection.mouseX, draggingConnection.mouseY)} stroke={color} strokeWidth={2} strokeDasharray="8 4" strokeLinecap="round" fill="none" opacity={0.7} />;
+                })()}
+              </svg>
+
+              {visibleDevices.map((device) => {
+                const def = DEVICE_DEFS[device.part];
+                const isSelected = device.id === selectedId;
+                const isInMulti = selectedIds.has(device.id);
+                if (!def) {
+                  return (
+                    <Card key={device.id} className={`absolute cursor-move transition-shadow ${isSelected ? "ring-2 ring-blue-500 shadow-lg" : isInMulti ? "ring-2 ring-green-400 shadow-lg" : "shadow"}`}
+                      style={{ left: device.x, top: device.y, width: 140 }}
+                      onMouseDown={(e) => onDeviceMouseDown(e, device.id)} onContextMenu={(e) => { e.preventDefault(); setCopiedDevice(device); }}>
+                      <CardContent className="p-2 flex items-center gap-2">
+                        <DeviceIcon part={device.part} className="w-6 h-6 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-semibold text-gray-800 truncate">{device.part}</div>
+                          <div className="text-xs text-gray-500 truncate">{device.name}</div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                }
+                const sw = def.w * (deviceScale / 100);
+                const sh = def.h * (deviceScale / 100);
+                const ports = customSchematics[device.part]?.ports || def.ports || [];
+                const portsByType = { power: [] as PortDef[], top: [] as PortDef[], bottom: [] as PortDef[], right: [] as PortDef[] };
+                ports.forEach((p) => {
+                  if (p.type === "AC" || p.type === "POWER") portsByType.power.push(p);
+                  else if (p.type === "LNET") portsByType.top.push(p);
+                  else if (p.type === "KB") portsByType.bottom.push(p);
+                  else if (p.type === "ETH") portsByType.right.push(p);
+                });
+                return (
+                  <div key={device.id} data-device-id={device.id}
+                    ref={(el) => { if (el) canvasDevicesRef.current.set(device.id, el); else canvasDevicesRef.current.delete(device.id); }}
+                    className={`absolute z-10 ${isSelected ? "ring-2 ring-blue-500" : isInMulti ? "ring-2 ring-green-400" : ""}`}
+                    style={{
+                      left: device.x,
+                      top: device.y,
+                      transform: "translate(-50%, -50%)",
+                      opacity: highlightedDeviceIds.size > 0
+                        ? (highlightedDeviceIds.has(device.id) ? 1 : 0.5)
+                        : (deviceOpacity / 100)
+                    }}
+                    onMouseDown={(e) => onDeviceMouseDown(e, device.id)} onContextMenu={(e) => { e.preventDefault(); setCopiedDevice(device); }}>
+                    <div className="relative">
+                      <div className="shadow-lg" style={{ opacity: deviceOpacity / 100 }}>
+                        {getDeviceSchematic(device.part) ? (
+                          <img src={getDeviceSchematic(device.part)} alt={device.part} style={{ width: sw, height: sh }} className="object-contain" />
+                        ) : (
+                          <DeviceSVG part={device.part} width={sw} height={sh} />
+                        )}
+                      </div>
+                      {showDeviceNames && <div className="absolute left-1/2 -translate-x-1/2 mt-1 text-center"><div className="text-sm font-semibold text-white whitespace-nowrap" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.5)" }}>{device.name}</div></div>}
+                      {showDeviceModels && <div className="absolute left-1/2 -translate-x-1/2 text-center" style={{ top: showDeviceNames ? "calc(100% + 22px)" : "calc(100% + 2px)" }}><div className="text-xs text-gray-300 whitespace-nowrap" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.5)" }}>{device.part}</div></div>}
+                      {showPorts && (
+                        <>
+                          {portsByType.power.map((p, i) => renderPort(device, def, p, i, portsByType.power.length, "power"))}
+                          {portsByType.top.map((p, i) => renderPort(device, def, p, i, portsByType.top.length, "top"))}
+                          {portsByType.bottom.map((p, i) => renderPort(device, def, p, i, portsByType.bottom.length, "bottom"))}
+                          {portsByType.right.map((p, i) => renderPort(device, def, p, i, portsByType.right.length, "right"))}
+                        </>
+                      )}
                     </div>
-                  </CardContent>
-                </Card>
-              );
-            }
-            const sw = def.w * (deviceScale / 100);
-            const sh = def.h * (deviceScale / 100);
-            const ports = customSchematics[device.part]?.ports || def.ports || [];
-            const portsByType = { power: [] as PortDef[], top: [] as PortDef[], bottom: [] as PortDef[], right: [] as PortDef[] };
-            ports.forEach((p) => {
-              if (p.type === "AC" || p.type === "POWER") portsByType.power.push(p);
-              else if (p.type === "LNET") portsByType.top.push(p);
-              else if (p.type === "KB") portsByType.bottom.push(p);
-              else if (p.type === "ETH") portsByType.right.push(p);
-            });
-            return (
-              <div key={device.id} data-device-id={device.id}
-                ref={(el) => { if (el) canvasDevicesRef.current.set(device.id, el); else canvasDevicesRef.current.delete(device.id); }}
-                className={`absolute z-10 ${isSelected ? "ring-2 ring-blue-500" : isInMulti ? "ring-2 ring-green-400" : ""}`}
-                style={{ 
-                  left: device.x, 
-                  top: device.y, 
-                  transform: "translate(-50%, -50%)", 
-                  opacity: highlightedDeviceIds.size > 0 
-                    ? (highlightedDeviceIds.has(device.id) ? 1 : 0.5)
-                    : (deviceOpacity / 100)
-                }}
-                onMouseDown={(e) => onDeviceMouseDown(e, device.id)} onContextMenu={(e) => { e.preventDefault(); setCopiedDevice(device); }}>
-                <div className="relative">
-                  <div className="shadow-lg" style={{ opacity: deviceOpacity / 100 }}>
-                    {getDeviceSchematic(device.part) ? (
-                      <img src={getDeviceSchematic(device.part)} alt={device.part} style={{ width: sw, height: sh }} className="object-contain" />
-                    ) : (
-                      <DeviceSVG part={device.part} width={sw} height={sh} />
-                    )}
                   </div>
-                  {showDeviceNames && <div className="absolute left-1/2 -translate-x-1/2 mt-1 text-center"><div className="text-sm font-semibold text-gray-900 whitespace-nowrap">{device.name}</div></div>}
-                  {showDeviceModels && <div className="absolute left-1/2 -translate-x-1/2 text-center" style={{ top: showDeviceNames ? "calc(100% + 22px)" : "calc(100% + 2px)" }}><div className="text-xs text-gray-600 whitespace-nowrap">{device.part}</div></div>}
-                  {showPorts && (
-                    <>
-                      {portsByType.power.map((p, i) => renderPort(device, def, p, i, portsByType.power.length, "power"))}
-                      {portsByType.top.map((p, i) => renderPort(device, def, p, i, portsByType.top.length, "top"))}
-                      {portsByType.bottom.map((p, i) => renderPort(device, def, p, i, portsByType.bottom.length, "bottom"))}
-                      {portsByType.right.map((p, i) => renderPort(device, def, p, i, portsByType.right.length, "right"))}
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          </div>
+
           {canvasSelectionBox && canvasRef.current && (() => {
             const rect = canvasRef.current.getBoundingClientRect();
-            const worldStartX = canvasSelectionBox.startX - rect.left + canvasRef.current.scrollLeft;
-            const worldStartY = canvasSelectionBox.startY - rect.top + canvasRef.current.scrollTop;
-            const worldEndX = canvasSelectionBox.endX - rect.left + canvasRef.current.scrollLeft;
-            const worldEndY = canvasSelectionBox.endY - rect.top + canvasRef.current.scrollTop;
             return (
               <div style={{
                 position: "absolute",
-                left: Math.min(worldStartX, worldEndX),
-                top: Math.min(worldStartY, worldEndY),
-                width: Math.abs(worldEndX - worldStartX),
-                height: Math.abs(worldEndY - worldStartY),
+                left: Math.min(canvasSelectionBox.startX, canvasSelectionBox.endX) - rect.left,
+                top: Math.min(canvasSelectionBox.startY, canvasSelectionBox.endY) - rect.top,
+                width: Math.abs(canvasSelectionBox.endX - canvasSelectionBox.startX),
+                height: Math.abs(canvasSelectionBox.endY - canvasSelectionBox.startY),
                 border: "2px solid #3b82f6",
                 backgroundColor: "rgba(59, 130, 246, 0.1)",
                 pointerEvents: "none",
@@ -1781,7 +1702,33 @@ export function Designer({ onBack }: DesignerProps) {
               }} />
             );
           })()}
-          </div>
+
+          <DesignerBottomBar
+            tool={tool}
+            onToolChange={(t) => { setTool(t); if (t !== "connect") setConnectFrom(null); }}
+            zoom={zoom}
+            onZoomChange={setZoomLevel}
+            onResetView={resetView}
+            onToggleEnvironment={() => setShowEnvironmentPanel(!showEnvironmentPanel)}
+            showEnvironmentPanel={showEnvironmentPanel}
+            onImport={() => document.getElementById("import-input")?.click()}
+            onExport={exportDesign}
+            onBom={() => setShowBomModal(true)}
+            onQuote={() => setShowQuotePanel(true)}
+            onPower={() => setShowPowerCalc(true)}
+            onAutoLNet={autoAssignLNet}
+            floorPlans={floorPlans}
+            activeFloorPlanId={activeFloorPlanId}
+            legacyImageUrl={currentProject?.background_image_url || null}
+            legacyOpacity={currentProject?.background_opacity ?? 60}
+            onAddFloorPlan={addFloorPlan}
+            onRemoveFloorPlan={removeFloorPlan}
+            onSetActiveFloorPlan={(id) => updateProject({ active_floor_plan_id: id })}
+            onRenameFloorPlan={renameFloorPlan}
+            onSetFloorPlanOpacity={setFloorPlanOpacity}
+            onMigrateLegacy={migrateLegacyFloorPlan}
+            onRemoveLegacy={removeLegacyFloorPlan}
+          />
         </div>
 
         {/* ENVIRONMENT PANEL */}

@@ -110,32 +110,28 @@ export function FloorPlanManager({
       />
 
       <div className="flex items-center gap-1">
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1.5 text-xs font-medium"
+        <button
+          className="h-8 px-2.5 rounded flex items-center gap-1.5 text-xs font-medium bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
           onClick={() => setIsOpen(!isOpen)}
         >
           <Layers className="w-3.5 h-3.5" />
           <span className="max-w-[120px] truncate">{displayLabel}</span>
           <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? "rotate-180" : ""}`} />
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 px-2"
+        </button>
+        <button
+          className="h-8 px-2 rounded flex items-center justify-center bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50"
           onClick={() => fileInputRef.current?.click()}
           title="Upload floor plan"
           disabled={isProcessing}
         >
           {isProcessing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-        </Button>
+        </button>
       </div>
 
       {isOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-          <div className="absolute top-full left-0 mt-1 z-50 bg-white rounded-lg shadow-xl border border-gray-200 w-72 overflow-hidden">
+          <div className="absolute bottom-full left-0 mb-1 z-50 bg-white rounded-lg shadow-xl border border-gray-200 w-72 overflow-hidden">
             <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Floor Plans</span>
               <Button

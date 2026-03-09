@@ -1907,7 +1907,7 @@ export function Designer({ onBack }: DesignerProps) {
                   </>
                 )}
                 <div className="flex justify-between"><span className="text-gray-600">Power:</span><span className="font-semibold">{devices.reduce((s, d) => s + (allDevices.find((l) => l.part === d.part)?.power_A || 0), 0).toFixed(2)}A</span></div>
-                <div className="flex justify-between"><span className="text-gray-600">Install Labor:</span><span className="font-semibold">{(() => { const m = devices.reduce((s, d) => s + (allDevices.find((l) => l.part === d.part)?.laborMinutes || 0), 0); return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`; })()}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600">Install Labor:</span><span className="font-semibold">{(() => { const m = devices.reduce((s, d) => s + (allDevices.find((l) => l.part === d.part)?.laborMinutes || 0), 0); return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : \`${m}m`; })()}</span></div>
               </div>
             </div>
 
@@ -1918,7 +1918,7 @@ export function Designer({ onBack }: DesignerProps) {
                   {Object.entries(lnetUtilization).map(([key, count]) => {
                     const [devId, portId] = key.split(":");
                     const dev = devices.find((d) => d.id === devId);
-                    return <div key={key} className={`flex items-center gap-2 text-xs ${count >= 22 ? "text-red-600 font-semibold" : count >= 18 ? "text-orange-600" : "text-gray-700"}`}><AlertCircle className="w-3 h-3" />{dev?.name || "Unknown"} {portId}: {count}/22</div>;
+                    return <div key={key} className={\`flex items-center gap-2 text-xs ${count >= 22 ? "text-red-600 font-semibold" : count >= 18 ? "text-orange-600" : "text-gray-700"}`}><AlertCircle className="w-3 h-3" />{dev?.name || "Unknown"} {portId}: {count}/22</div>;
                   })}
                 </div>
               </div>
@@ -1932,10 +1932,10 @@ export function Designer({ onBack }: DesignerProps) {
                     <div key={psu.id} className="space-y-1">
                       <div className="flex justify-between items-center text-xs">
                         <span className="font-medium">{psu.name}</span>
-                        <span className={`font-semibold ${utilization > 80 ? "text-red-600" : utilization > 60 ? "text-amber-600" : "text-green-600"}`}>{utilization.toFixed(0)}%</span>
+                        <span className={\`font-semibold ${utilization > 80 ? "text-red-600" : utilization > 60 ? "text-amber-600" : "text-green-600"}`}>{utilization.toFixed(0)}%</span>
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-1.5">
-                        <div className={`h-1.5 rounded-full ${utilization > 80 ? "bg-red-500" : utilization > 60 ? "bg-amber-500" : "bg-green-500"}`} style={{ width: `${Math.min(utilization, 100)}%` }} />
+                        <div className={\`h-1.5 rounded-full ${utilization > 80 ? "bg-red-500" : utilization > 60 ? "bg-amber-500" : "bg-green-500"}`} style={{ width: \`${Math.min(utilization, 100)}%` }} />
                       </div>
                       <div className="text-xs text-gray-500">{usedPower}mA / {psu.maxPower_mA}mA</div>
                     </div>

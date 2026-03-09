@@ -281,7 +281,7 @@ export function Designer({ onBack }: DesignerProps) {
     const def = DEVICE_DEFS[d.part];
     const baseW = def?.w ?? 140;
     const baseH = def?.h ?? 80;
-    const scale = (currentProject?.device_scale ?? 100) / 200;
+    const scale = (currentProject?.device_scale ?? 100) / 800;
     return { w: baseW * scale, h: baseH * scale };
   };
 

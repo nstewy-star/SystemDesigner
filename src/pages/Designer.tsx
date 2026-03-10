@@ -1603,13 +1603,13 @@ export function Designer({ onBack }: DesignerProps) {
                       onMouseLeave={() => setHoveredWallId(null)}
                       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setWalls(walls.filter((w) => w.id !== wall.id)); }} />
                     <line x1={wall.x1} y1={wall.y1} x2={wall.x2} y2={wall.y2}
-                      stroke={hoveredWallId === wall.id ? "#ef4444" : "#334155"}
+                      stroke={hoveredWallId === wall.id ? "#ef4444" : "#f8fafc"}
                       strokeWidth={hoveredWallId === wall.id ? 5 / zoom : 4 / zoom}
                       opacity={wallsOpacity / 100}
                       strokeLinecap="round"
                       style={{ pointerEvents: "none" }} />
                     <line x1={wall.x1} y1={wall.y1} x2={wall.x2} y2={wall.y2}
-                      stroke={hoveredWallId === wall.id ? "rgba(239,68,68,0.25)" : "rgba(51,65,85,0.15)"}
+                      stroke={hoveredWallId === wall.id ? "rgba(239,68,68,0.25)" : "rgba(248,250,252,0.15)"}
                       strokeWidth={10 / zoom}
                       opacity={wallsOpacity / 100}
                       strokeLinecap="round"

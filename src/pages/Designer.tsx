@@ -80,7 +80,9 @@ export function Designer({ onBack }: DesignerProps) {
   const [connectFrom, setConnectFrom] = useState<string | null>(null);
   const [showDeviceModels, setShowDeviceModels] = useState(false);
   const [drawingWall, setDrawingWall] = useState<{ x: number; y: number } | null>(null);
+  const [wallPoints, setWallPoints] = useState<{ x: number; y: number }[]>([]);
   const [wallPreviewEnd, setWallPreviewEnd] = useState<{ x: number; y: number } | null>(null);
+  const [hoveredWallId, setHoveredWallId] = useState<string | null>(null);
   const [editingPaletteDevice, setEditingPaletteDevice] = useState(false);
   const [showAddDeviceForm, setShowAddDeviceForm] = useState(false);
   const [customDevices, setCustomDevices] = useState<DeviceLibraryItem[]>([]);
@@ -791,8 +793,8 @@ export function Designer({ onBack }: DesignerProps) {
   };
 
   const getRoutedPath = useCallback((conn: Connection) => {
-    return routeConnection(conn, devices, DEVICE_DEFS, schematicsForRouting, deviceScale);
-  }, [devices, schematicsForRouting, deviceScale]);
+    return routeConnection(conn, devices, DEVICE_DEFS, schematicsForRouting, deviceScale, walls);
+  }, [devices, schematicsForRouting, deviceScale, walls]);
 
   const getStraightPath = (x1: number, y1: number, x2: number, y2: number) => `M ${x1} ${y1} L ${x2} ${y2}`;
   const getLineColor = (type: PortType) => TYPE_COLOR[type] || "#6b7280";
@@ -1052,7 +1054,7 @@ export function Designer({ onBack }: DesignerProps) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setDraggingConnection(null); setConnectFrom(null); setShowCompatibleModal(false); restoreToolAfterConnect(); setHighlightedDeviceIds(new Set()); return; }
+      if (e.key === "Escape") { setDraggingConnection(null); setConnectFrom(null); setShowCompatibleModal(false); restoreToolAfterConnect(); setHighlightedDeviceIds(new Set()); setDrawingWall(null); setWallPoints([]); setWallPreviewEnd(null); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         undo();
@@ -1527,23 +1529,60 @@ export function Designer({ onBack }: DesignerProps) {
               setAlignmentMenu({ x: e.clientX, y: e.clientY });
             }
           }}
-          onDoubleClick={(e) => { if (!copiedDevice || !canvasRef.current) return; const { x, y } = canvasToWorld(e.clientX, e.clientY); setDevices([...devices, { ...copiedDevice, id: crypto.randomUUID(), name: `${copiedDevice.part}-${devices.length + 1}`, x, y, floorPlanId: activeFloorPlanId || undefined }]); }}
+          onDoubleClick={(e) => {
+            if (tool === "wall" && canvasRef.current) {
+              const rawPos = canvasToWorld(e.clientX, e.clientY);
+              const snapGrid = 20;
+              const snapped = { x: Math.round(rawPos.x / snapGrid) * snapGrid, y: Math.round(rawPos.y / snapGrid) * snapGrid };
+              if (wallPoints.length >= 1) {
+                const allPts = [...wallPoints, snapped];
+                const newWalls = walls.slice();
+                for (let i = 0; i + 1 < allPts.length; i++) {
+                  const p1 = allPts[i], p2 = allPts[i + 1];
+                  if (Math.abs(p1.x - p2.x) > 1 || Math.abs(p1.y - p2.y) > 1) {
+                    newWalls.push({ id: crypto.randomUUID(), x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y });
+                  }
+                }
+                setWalls(newWalls);
+                setWallPoints([]);
+                setDrawingWall(null);
+                setWallPreviewEnd(null);
+              }
+              return;
+            }
+            if (!copiedDevice || !canvasRef.current) return;
+            const { x, y } = canvasToWorld(e.clientX, e.clientY);
+            setDevices([...devices, { ...copiedDevice, id: crypto.randomUUID(), name: `${copiedDevice.part}-${devices.length + 1}`, x, y, floorPlanId: activeFloorPlanId || undefined }]);
+          }}
           onClick={(e) => {
             if (highlightedDeviceIds.size > 0 && e.target === canvasRef.current) {
               setHighlightedDeviceIds(new Set());
               return;
             }
             if (tool === "wall" && canvasRef.current) {
-              const { x, y } = canvasToWorld(e.clientX, e.clientY);
-              if (!drawingWall) setDrawingWall({ x, y });
-              else { setWalls([...walls, { id: crypto.randomUUID(), x1: drawingWall.x, y1: drawingWall.y, x2: x, y2: y }]); setDrawingWall(null); }
+              const rawPos = canvasToWorld(e.clientX, e.clientY);
+              const snapGrid = 20;
+              const snapped = { x: Math.round(rawPos.x / snapGrid) * snapGrid, y: Math.round(rawPos.y / snapGrid) * snapGrid };
+              if (wallPoints.length === 0) {
+                setWallPoints([snapped]);
+                setDrawingWall(snapped);
+              } else {
+                setWallPoints((prev) => [...prev, snapped]);
+                setDrawingWall(snapped);
+              }
             }
           }}
           onMouseMove={(e) => {
             if (spacebarPressed || !canvasRef.current) return;
-            const { x, y } = canvasToWorld(e.clientX, e.clientY);
-            if (tool === "wall" && drawingWall) setWallPreviewEnd({ x, y });
-            if (draggingConnection) setDraggingConnection((prev) => prev ? { ...prev, mouseX: x, mouseY: y } : null);
+            const rawPos = canvasToWorld(e.clientX, e.clientY);
+            const snapGrid = 20;
+            const snapped = { x: Math.round(rawPos.x / snapGrid) * snapGrid, y: Math.round(rawPos.y / snapGrid) * snapGrid };
+            if (tool === "wall" && wallPoints.length > 0) setWallPreviewEnd(snapped);
+            if (tool !== "wall") {
+              setWallPreviewEnd(null);
+              if (hoveredWallId !== null) setHoveredWallId(null);
+            }
+            if (draggingConnection) setDraggingConnection((prev) => prev ? { ...prev, mouseX: rawPos.x, mouseY: rawPos.y } : null);
           }}
         >
           <CanvasBackground
@@ -1556,9 +1595,42 @@ export function Designer({ onBack }: DesignerProps) {
 
           <div className="absolute inset-0 pointer-events-none" style={{ overflow: "hidden" }}>
             <div style={{ position: "absolute", left: 0, top: 0, transformOrigin: "0 0", transform: `translate(${viewState.offsetX}px, ${viewState.offsetY}px) scale(${zoom})`, pointerEvents: "auto" }}>
-              <svg className="absolute pointer-events-none z-0" style={{ width: 10000, height: 10000, left: -5000, top: -5000, overflow: "visible" }}>
-                {walls.map((wall) => <line key={wall.id} x1={wall.x1} y1={wall.y1} x2={wall.x2} y2={wall.y2} stroke="#1e293b" strokeWidth={4} opacity={wallsOpacity / 100} />)}
-                {drawingWall && wallPreviewEnd && <line x1={drawingWall.x} y1={drawingWall.y} x2={wallPreviewEnd.x} y2={wallPreviewEnd.y} stroke="#3b82f6" strokeWidth={4} strokeDasharray="8 4" opacity={0.6} />}
+              <svg className="absolute z-0" style={{ width: 10000, height: 10000, left: -5000, top: -5000, overflow: "visible", pointerEvents: tool === "wall" ? "auto" : "none" }}>
+                {walls.map((wall) => (
+                  <g key={wall.id}>
+                    <line x1={wall.x1} y1={wall.y1} x2={wall.x2} y2={wall.y2} stroke="transparent" strokeWidth={12} style={{ pointerEvents: "stroke", cursor: tool === "wall" ? "pointer" : "default" }}
+                      onMouseEnter={() => { if (tool === "wall") setHoveredWallId(wall.id); }}
+                      onMouseLeave={() => setHoveredWallId(null)}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setWalls(walls.filter((w) => w.id !== wall.id)); }} />
+                    <line x1={wall.x1} y1={wall.y1} x2={wall.x2} y2={wall.y2}
+                      stroke={hoveredWallId === wall.id ? "#ef4444" : "#334155"}
+                      strokeWidth={hoveredWallId === wall.id ? 5 / zoom : 4 / zoom}
+                      opacity={wallsOpacity / 100}
+                      strokeLinecap="round"
+                      style={{ pointerEvents: "none" }} />
+                    <line x1={wall.x1} y1={wall.y1} x2={wall.x2} y2={wall.y2}
+                      stroke={hoveredWallId === wall.id ? "rgba(239,68,68,0.25)" : "rgba(51,65,85,0.15)"}
+                      strokeWidth={10 / zoom}
+                      opacity={wallsOpacity / 100}
+                      strokeLinecap="round"
+                      style={{ pointerEvents: "none" }} />
+                  </g>
+                ))}
+                {wallPoints.length > 1 && wallPoints.slice(0, -1).map((pt, i) => (
+                  <line key={`wip-${i}`} x1={pt.x} y1={pt.y} x2={wallPoints[i + 1].x} y2={wallPoints[i + 1].y}
+                    stroke="#3b82f6" strokeWidth={4 / zoom} strokeLinecap="round" opacity={0.8} style={{ pointerEvents: "none" }} />
+                ))}
+                {wallPoints.length > 0 && wallPreviewEnd && (
+                  <line x1={wallPoints[wallPoints.length - 1].x} y1={wallPoints[wallPoints.length - 1].y}
+                    x2={wallPreviewEnd.x} y2={wallPreviewEnd.y}
+                    stroke="#3b82f6" strokeWidth={3 / zoom} strokeDasharray={`${8 / zoom} ${4 / zoom}`} strokeLinecap="round" opacity={0.7} style={{ pointerEvents: "none" }} />
+                )}
+                {wallPoints.map((pt, i) => (
+                  <circle key={`wp-${i}`} cx={pt.x} cy={pt.y} r={4 / zoom} fill="#3b82f6" opacity={0.9} style={{ pointerEvents: "none" }} />
+                ))}
+                {wallPreviewEnd && wallPoints.length > 0 && (
+                  <circle cx={wallPreviewEnd.x} cy={wallPreviewEnd.y} r={3 / zoom} fill="#3b82f6" opacity={0.5} style={{ pointerEvents: "none" }} />
+                )}
                 {(() => {
                   const groups = new Map<string, Connection[]>();
                   visibleConnections.forEach((c) => {
@@ -1703,9 +1775,24 @@ export function Designer({ onBack }: DesignerProps) {
             );
           })()}
 
+          {tool === "wall" && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+              <div className="bg-gray-900/90 backdrop-blur-sm border border-blue-500/40 rounded-lg px-4 py-2 text-xs text-center shadow-xl">
+                {wallPoints.length === 0 ? (
+                  <span className="text-blue-300 font-medium">Click to start drawing a wall &mdash; snaps to 20px grid</span>
+                ) : (
+                  <span className="text-blue-300 font-medium">
+                    <span className="text-white">{wallPoints.length}</span> point{wallPoints.length > 1 ? "s" : ""} &mdash;
+                    Click to add segment &bull; <kbd className="px-1 py-0.5 bg-gray-700 rounded text-gray-200">Double-click</kbd> to finish &bull; <kbd className="px-1 py-0.5 bg-gray-700 rounded text-gray-200">Esc</kbd> to cancel &bull; Right-click wall to delete
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           <DesignerBottomBar
             tool={tool}
-            onToolChange={(t) => { setTool(t); if (t !== "connect") setConnectFrom(null); }}
+            onToolChange={(t) => { setTool(t); if (t !== "connect") setConnectFrom(null); if (t !== "wall") { setWallPoints([]); setDrawingWall(null); setWallPreviewEnd(null); } }}
             zoom={zoom}
             onZoomChange={setZoomLevel}
             onResetView={resetView}

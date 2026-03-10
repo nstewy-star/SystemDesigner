@@ -1,4 +1,4 @@
-import type { Device, Connection, PortDef, DeviceDef } from "../types";
+import type { Device, Connection, PortDef, DeviceDef, Wall } from "../types";
 
 interface Rect {
   id: string;
@@ -196,7 +196,8 @@ function countHitsRaw(
   points: Point[],
   rects: Rect[],
   skipFirstId?: string,
-  skipLastId?: string
+  skipLastId?: string,
+  walls?: Wall[]
 ): number {
   let count = 0;
   const last = points.length - 2;
@@ -205,6 +206,15 @@ function countHitsRaw(
       if (i === 0 && last > 0 && rect.id === skipFirstId) continue;
       if (i === last && last > 0 && rect.id === skipLastId) continue;
       if (segmentIntersectsRect(points[i], points[i + 1], rect)) count++;
+    }
+    if (walls) {
+      for (const wall of walls) {
+        if (segmentsIntersect(
+          points[i], points[i + 1],
+          { x: wall.x1, y: wall.y1 },
+          { x: wall.x2, y: wall.y2 }
+        )) count += 100;
+      }
     }
   }
   return count;
@@ -263,7 +273,8 @@ export function routeConnection(
   devices: Device[],
   deviceDefs: Record<string, DeviceDef>,
   customSchematics: Record<string, { ports: PortDef[] }>,
-  deviceScale: number
+  deviceScale: number,
+  walls?: Wall[]
 ): string {
   const fromDev = devices.find(d => d.id === conn.fromId);
   const toDev = devices.find(d => d.id === conn.toId);
@@ -299,7 +310,7 @@ export function routeConnection(
   const thirdPartyRects = allRects.filter(r => r.id !== fromId && r.id !== toId);
 
   const directPath = [start, end];
-  if (countHitsRaw(directPath, allRects) === 0) {
+  if (countHitsRaw(directPath, allRects, undefined, undefined, walls) === 0) {
     return pointsToPath(directPath);
   }
 
@@ -308,12 +319,40 @@ export function routeConnection(
 
   const candidates = buildCandidates(start, end, startDir, endDir, thirdPartyRects, fromRect, toRect);
 
+  if (walls && walls.length > 0) {
+    const wallOffset = MARGIN;
+    for (const wall of walls) {
+      const wx1 = wall.x1, wy1 = wall.y1, wx2 = wall.x2, wy2 = wall.y2;
+      const perpDx = -(wy2 - wy1);
+      const perpDy = wx2 - wx1;
+      const perpLen = Math.sqrt(perpDx * perpDx + perpDy * perpDy) || 1;
+      const nx = (perpDx / perpLen) * wallOffset;
+      const ny = (perpDy / perpLen) * wallOffset;
+
+      for (const side of [1, -1] as const) {
+        const wp1 = { x: wx1 + nx * side, y: wy1 + ny * side };
+        const wp2 = { x: wx2 + nx * side, y: wy2 + ny * side };
+        const midWp = { x: (wp1.x + wp2.x) / 2, y: (wp1.y + wp2.y) / 2 };
+
+        const se = applyDir(start, startDir, MARGIN);
+        const ee = applyDir(end, endDir, MARGIN);
+
+        candidates.push([start, se, { x: se.x, y: wp1.y }, wp1, { x: wp1.x, y: ee.y }, ee, end]);
+        candidates.push([start, se, { x: wp1.x, y: se.y }, wp1, { x: ee.x, y: wp1.y }, ee, end]);
+        candidates.push([start, se, { x: se.x, y: midWp.y }, midWp, { x: ee.x, y: midWp.y }, ee, end]);
+        candidates.push([start, se, { x: midWp.x, y: se.y }, midWp, { x: midWp.x, y: ee.y }, ee, end]);
+        candidates.push([start, se, wp1, wp2, ee, end]);
+        candidates.push([start, se, midWp, ee, end]);
+      }
+    }
+  }
+
   let bestPath = directPath;
-  let bestHits = countHitsRaw(directPath, allRects);
+  let bestHits = countHitsRaw(directPath, allRects, undefined, undefined, walls);
   let bestLen = pathLength(directPath);
 
   for (const candidate of candidates) {
-    const hits = countHitsRaw(candidate, allRects, fromId, toId);
+    const hits = countHitsRaw(candidate, allRects, fromId, toId, walls);
     const len = pathLength(candidate);
     if (hits < bestHits || (hits === bestHits && len < bestLen)) {
       bestPath = candidate;

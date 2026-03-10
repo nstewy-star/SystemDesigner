@@ -1337,7 +1337,7 @@ export function Designer({ onBack }: DesignerProps) {
     const usage = portUsage(device.id, p.id);
     const overCapacity = !!(p.limit && usage >= p.limit);
     const isUsed = usage > 0;
-    const size = 12;
+    const size = Math.max(6, Math.round(12 * (deviceScale / 100)));
     let posStyle: React.CSSProperties = {};
     if (position === "power") posStyle = { position: "absolute", left: -size / 2, top: `${(index + 1) * (100 / (total + 1))}%`, transform: "translateY(-50%)" };
     else if (position === "top") posStyle = { position: "absolute", top: -size / 2, left: `${(index + 1) * (100 / (total + 1))}%`, transform: "translateX(-50%)" };
@@ -1349,9 +1349,9 @@ export function Designer({ onBack }: DesignerProps) {
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setPortContextMenu({ x: e.clientX, y: e.clientY, deviceId: device.id, portId: p.id, portType: p.type as PortType, devicePart: device.part }); }}
         style={{ ...posStyle, pointerEvents: "auto", zIndex: 20 }}>
         <div className="rounded-full flex items-center justify-center transition-all hover:scale-150"
-          style={{ width: size, height: size, backgroundColor: isUsed ? color : "white", border: `1px solid ${color}`, boxShadow: overCapacity ? "0 0 0 1px #fecaca" : "0 1px 2px rgba(0,0,0,0.15)" }}
+          style={{ width: size, height: size, backgroundColor: isUsed ? color : "white", border: `1px solid ${color}`, boxShadow: overCapacity ? "0 0 0 1px #fecaca" : "0 1px 2px rgba(0,0,0,0.15)", fontSize: Math.max(5, Math.round(8 * (deviceScale / 100))) }}
           title={`${p.label} (${p.type})${isUsed ? ` - ${usage} connection${usage > 1 ? "s" : ""}` : ""}`}>
-          {isUsed && <span className="text-[8px] font-bold text-white">{usage > 1 ? usage : ""}</span>}
+          {isUsed && <span className="font-bold text-white" style={{ fontSize: "inherit" }}>{usage > 1 ? usage : ""}</span>}
         </div>
       </div>
     );

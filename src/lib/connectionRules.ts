@@ -74,7 +74,7 @@ for (const part of CORRIDOR_LIGHTS) {
     ...CORRIDOR_LIGHTS,
     ...DOMELESS_CONTROLLERS,
     ...ROOM_DEVICES,
-  ].filter(p => p !== part);
+  ];
 }
 
 for (const part of DOMELESS_CONTROLLERS) {
@@ -83,7 +83,7 @@ for (const part of DOMELESS_CONTROLLERS) {
     ...CORRIDOR_LIGHTS,
     ...DOMELESS_CONTROLLERS,
     ...ROOM_DEVICES,
-  ].filter(p => p !== part);
+  ];
 }
 
 for (const part of ROOM_DEVICES) {
@@ -92,7 +92,7 @@ for (const part of ROOM_DEVICES) {
     ...DOMELESS_CONTROLLERS,
     ...ROOM_DEVICES,
     "R5KMTRM",
-  ].filter(p => p !== part);
+  ];
 }
 
 KB_PORT_COMPATIBILITY["R4KPA25"] = ["R5KMTRM", ...CORRIDOR_LIGHTS];

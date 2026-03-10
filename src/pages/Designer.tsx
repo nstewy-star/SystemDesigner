@@ -2073,12 +2073,16 @@ export function Designer({ onBack }: DesignerProps) {
               const connectedDeviceIds = new Set(portConns.map(c =>
                 c.fromId === portContextMenu.deviceId ? c.toId : c.fromId
               ));
-              const compatible = getCompatibleDevices(portContextMenu.devicePart, portContextMenu.portType, true);
+              const compatible = getCompatibleDevices(portContextMenu.devicePart, portContextMenu.portType, false);
               const compatibleParts = new Set(compatible.filter((part) => {
                 const ports = getDevicePorts(part);
                 return ports.some(p => p.type === portContextMenu.portType);
               }));
-              const compatibleItems = [...compatibleParts]
+              const compatibleForAdd = new Set(getCompatibleDevices(portContextMenu.devicePart, portContextMenu.portType, true).filter((part) => {
+                const ports = getDevicePorts(part);
+                return ports.some(p => p.type === portContextMenu.portType);
+              }));
+              const compatibleItems = [...compatibleForAdd]
                 .map((part) => ({ part, label: allDevices.find((d) => d.part === part)?.label || part }));
               const port = getPort(portContextMenu.deviceId, portContextMenu.portId);
               const usage = portUsage(portContextMenu.deviceId, portContextMenu.portId);

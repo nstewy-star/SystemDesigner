@@ -154,7 +154,7 @@ export function DesignerBottomBar({
         <button
           onClick={onResetView}
           className="p-1.5 rounded transition-colors bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white"
-          title="Reset View"
+          title="Fit All (devices, walls, floor plan)"
         >
           <Maximize className="w-3.5 h-3.5" />
         </button>

@@ -132,6 +132,26 @@ export function useCanvasViewport() {
     });
   }, []);
 
+  const fitToBounds = useCallback((minX: number, minY: number, maxX: number, maxY: number) => {
+    const container = containerRef.current;
+    const w = maxX - minX;
+    const h = maxY - minY;
+    if (!container || w <= 0 || h <= 0) return;
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    const padding = 60;
+    const newZoom = Math.min(
+      (cw - padding * 2) / w,
+      (ch - padding * 2) / h,
+      2
+    );
+    setViewState({
+      offsetX: (cw - w * newZoom) / 2 - minX * newZoom,
+      offsetY: (ch - h * newZoom) / 2 - minY * newZoom,
+      zoom: newZoom,
+    });
+  }, []);
+
   return {
     viewState,
     setViewState,
@@ -145,6 +165,7 @@ export function useCanvasViewport() {
     setZoomLevel,
     resetView,
     fitToContent,
+    fitToBounds,
     isPanning: isPanningRef,
   };
 }

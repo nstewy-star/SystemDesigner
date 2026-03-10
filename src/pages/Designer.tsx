@@ -106,7 +106,7 @@ export function Designer({ onBack }: DesignerProps) {
   const {
     viewState, containerRef: canvasRef, screenToWorld, worldToScreen,
     handleWheel: viewportWheel, startPan, updatePan, endPan,
-    setZoomLevel, resetView, isPanning,
+    setZoomLevel, resetView, fitToBounds, isPanning,
   } = useCanvasViewport();
   const zoom = viewState.zoom;
   // undo history buffer (devices+connections)
@@ -728,6 +728,28 @@ export function Designer({ onBack }: DesignerProps) {
     updateProject({
       floor_plans: floorPlans.map((fp) => (fp.id === id ? { ...fp, name } : fp)),
     });
+  };
+
+  const fitAll = () => {
+    const points: { x: number; y: number }[] = [];
+    visibleDevices.forEach((d) => {
+      const def = DEVICE_DEFS[d.part];
+      const w = def ? def.w * (deviceScale / 100) : 60;
+      const h = def ? def.h * (deviceScale / 100) : 60;
+      points.push({ x: d.x, y: d.y }, { x: d.x + w, y: d.y + h });
+    });
+    walls.forEach((wall) => {
+      points.push({ x: wall.x1, y: wall.y1 }, { x: wall.x2, y: wall.y2 });
+    });
+    if (activeFloorPlan?.naturalWidth && activeFloorPlan?.naturalHeight) {
+      points.push({ x: 0, y: 0 }, { x: activeFloorPlan.naturalWidth, y: activeFloorPlan.naturalHeight });
+    }
+    if (points.length === 0) { resetView(); return; }
+    const minX = Math.min(...points.map((p) => p.x));
+    const minY = Math.min(...points.map((p) => p.y));
+    const maxX = Math.max(...points.map((p) => p.x));
+    const maxY = Math.max(...points.map((p) => p.y));
+    fitToBounds(minX, minY, maxX, maxY);
   };
 
   const setFloorPlanOpacity = (id: string, opacity: number) => {
@@ -1795,7 +1817,7 @@ export function Designer({ onBack }: DesignerProps) {
             onToolChange={(t) => { setTool(t); if (t !== "connect") setConnectFrom(null); if (t !== "wall") { setWallPoints([]); setDrawingWall(null); setWallPreviewEnd(null); } }}
             zoom={zoom}
             onZoomChange={setZoomLevel}
-            onResetView={resetView}
+            onResetView={fitAll}
             onToggleEnvironment={() => setShowEnvironmentPanel(!showEnvironmentPanel)}
             showEnvironmentPanel={showEnvironmentPanel}
             onImport={() => document.getElementById("import-input")?.click()}
